@@ -1,0 +1,26 @@
+{
+  "image": "ghcr.io/garrickwelsh/devcontainer-rust:20260522.10.20.35",
+  "remoteEnv": {
+    "PODMAN_USERNS": "keep-id"
+  },
+  "containerUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "EditorConfig.EditorConfig",
+        "bierner.markdown-mermaid",
+        "bpruitt-goddard.mermaid-markdown-syntax-highlighting",
+        "eamodio.gitlens",
+        "mhutchie.git-graph",
+        "ms-azuretools.vscode-docker",
+        "ms-dotnettools.vscodeintellicode-csharp",
+        "mutantdino.resourcemonitor",
+        "tomoyukim.vscode-mermaid-editor"
+      ]
+    }
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/.config/helix,target=/home/vscode/.config/helix,type=bind"
+  ],
+  "postStartCommand": "rustup update"
+}
