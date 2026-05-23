@@ -1,0 +1,16 @@
+[package]
+name = "ltlsp-parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ltlsp-types = { path = "../ltlsp-types" }
+tree-sitter = { workspace = true }
+tree-sitter-rust = "0.24.2"
+tree-sitter-html = "0.23.2"
+tree-sitter-json = "0.24"
+tree-sitter-md = { version = "0.5.3", features = ["parser"] }
+tree-sitter-javascript = "0.25.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-c-sharp = "0.23.5"
+tree-sitter-typescript = "0.23.2"

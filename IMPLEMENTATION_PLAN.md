@@ -8,27 +8,44 @@ Development will be organized by module to support isolated subagent execution.
 ## Phase 0: Environment Setup
 Focus: Ensuring the development environment and network boundaries are ready.
 
-- [ ] **Network Strategy**: Update `.devcontainer/devcontainer.json` to use `--network host` in `runArgs`.
-- [ ] **LT Server Setup**: Add `just` recipes to pull and run the LanguageTool server (`ghcr.io/garrickwelsh/languagetool`) using `--network host` so it binds to the shared `localhost`.
-- [ ] **Project Init**: Initialize Rust workspace and add core dependencies (`lsp-server`, `tree-sitter`, statically linked tree-sitter grammars (`rust`, `markdown`, `html`, `json`, `csharp`), `reqwest`, `tokio`, `wiremock` for dev).
+- [x] **Network Strategy**: Update `.devcontainer/devcontainer.json` to use `--network host` in `runArgs`.
+- [x] **LT Server Setup**: Add `just` recipes to pull and run the LanguageTool server (`ghcr.io/garrickwelsh/languagetool`) using `--network host` so it binds to the shared `localhost`.
+- [x] **Project Init**: Initialize Rust workspace (`crates/*`) and add core dependencies (`lsp-server`, `tree-sitter`, statically linked tree-sitter grammars, `reqwest`, `tokio`, `wiremock` for dev).
 
 ## Phase 1: `client` Module (LanguageTool HTTP Client)
 Focus: Communicating with the LanguageTool server using batched `AnnotatedText`.
 Public Interface: `pub struct LanguageToolClient`, `pub async fn check(&self, text: AnnotatedText) -> Result<Vec<GrammarError>>`
 
-- [ ] **TDD Cycle 1**: Test client initialization with configurable `base_url` (supporting both localhost and remote cloud servers).
-- [ ] **TDD Cycle 2**: Test sending a simple string to a `wiremock` mock LT server and receiving a JSON response.
-- [ ] **TDD Cycle 3**: Test the mapping of LT `match` objects to internal `GrammarError` models.
-- [ ] **TDD Cycle 4**: Test compiling an `AnnotatedText` request (mixing text and markup) and handling the batched response.
+- [x] **TDD Cycle 1**: Test client initialization with configurable `base_url` (supporting both localhost and remote cloud servers).
+- [x] **TDD Cycle 2**: Test sending a simple string to a `wiremock` mock LT server and receiving a JSON response.
+- [x] **TDD Cycle 3**: Test the mapping of LT `match` objects to internal `GrammarError` models.
+- [x] **TDD Cycle 4**: Test compiling an `AnnotatedText` request (mixing text and markup) and handling the batched response.
 
 ## Phase 2: `parser` Module (Tree-sitter Integration)
 Focus: Turning raw files into single `AnnotatedText` blocks using static grammars.
 Public Interface: `pub fn parse_document(language: &str, content: &str) -> AnnotatedText`
 
+### Markdown Grammar (Dual-Parser Architecture)
+Markdown requires two passes. Use crate `tree-sitter-md = "0.5.3"` — the official
+`tree-sitter-grammars/tree-sitter-markdown` repo, same source Helix uses, published to
+crates.io as `tree-sitter-md`.
+
+| Constant / Type | Purpose |
+|---|---|
+| `tree_sitter_md::LANGUAGE` | Block grammar: sections, headings, lists, code fences, paragraphs |
+| `tree_sitter_md::INLINE_LANGUAGE` | Inline grammar: bold, links, code spans |
+| `tree_sitter_md::MarkdownParser` (`features = ["parser"]`) | Convenience wrapper: runs both passes, returns `MarkdownTree` |
+
+Parse flow for text extraction:
+1. `MarkdownParser::parse(source.as_bytes(), None)` → `MarkdownTree`
+2. Walk `MarkdownTree` with `MarkdownCursor`; prose lives in `inline` nodes
+3. Fenced code blocks: extract language tag + content → recurse into language-specific
+   sub-parser (unknown/unsupported language → treat entire block as **markup**, skip)
+
 - [ ] **TDD Cycle 5**: Test mapping `languageId` and file extensions to the statically linked grammars.
 - [ ] **TDD Cycle 6**: Test extracting single-line and multi-line doc comments in Rust.
 - [ ] **TDD Cycle 7**: Test extraction of text from HTML tags (`<p>`, `<div>`, `<li>`) and exclusion of `<script>`/`<style>`.
-- [ ] **TDD Cycle 8**: Test recursive parsing: Markdown prose -> fenced code block -> Rust comments.
+- [ ] **TDD Cycle 8**: Test recursive parsing via `MarkdownParser`: prose `inline` nodes extracted as text, fenced code blocks recursed into language-specific sub-parser (Rust doc comments extracted), unknown fence language treated as markup (skipped).
 - [ ] **TDD Cycle 9**: Test that extracted text snippets track their **absolute byte offset** from the root document to simplify translation later.
 
 ## Phase 3: `dictionary` Module (Local Truth)
