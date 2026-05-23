@@ -2,11 +2,19 @@ use serde::Deserialize;
 
 pub use ltlsp_types::{AnnotatedText, GrammarError, TextSegment};
 
+/// Configuration for creating a [`LanguageToolClient`].
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
+    /// Base URL of the LanguageTool server (e.g., `http://localhost:8081`).
+    /// Do not include the `/v2/check` path; it is appended automatically.
     pub base_url: String,
 }
 
+/// HTTP client for communicating with the LanguageTool API.
+///
+/// Wraps a `reqwest::Client` and handles serialization of [`AnnotatedText`]
+/// into the format expected by LanguageTool's `/v2/check` endpoint. Deserializes
+/// responses into [`GrammarError`] instances.
 #[derive(Debug, Clone)]
 pub struct LanguageToolClient {
     config: ClientConfig,
@@ -14,6 +22,10 @@ pub struct LanguageToolClient {
 }
 
 impl LanguageToolClient {
+    /// Creates a new client with the given configuration.
+    ///
+    /// # Arguments
+    /// * `config` - Connection settings including the LanguageTool server URL.
     pub fn new(config: ClientConfig) -> Self {
         Self {
             config,
@@ -21,10 +33,22 @@ impl LanguageToolClient {
         }
     }
 
+    /// Returns the base URL configured for this client.
     pub fn base_url(&self) -> &str {
         &self.config.base_url
     }
 
+    /// Sends text to the LanguageTool `/v2/check` endpoint and returns grammar errors.
+    ///
+    /// Automatically chooses between form-encoded plain text or JSON annotation format
+    /// based on whether the input contains markup segments.
+    ///
+    /// # Arguments
+    /// * `text` - The annotated text to check. Prose segments are checked; markup
+    ///   segments are skipped but preserved for offset mapping.
+    ///
+    /// # Errors
+    /// Returns `reqwest::Error` on network failure, invalid URL, or deserialization failure.
     pub async fn check(&self, text: AnnotatedText) -> Result<Vec<GrammarError>, reqwest::Error> {
         let url = format!("{}/v2/check", self.config.base_url);
         let has_markup = text.segments.iter().any(|s| s.is_markup);

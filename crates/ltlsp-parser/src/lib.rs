@@ -30,6 +30,21 @@ fn language_from_extension(ext: &str) -> Option<tree_sitter::Language> {
     }
 }
 
+/// Parses source content and extracts prose segments for grammar checking.
+///
+/// Uses `tree-sitter` to identify doc comments, HTML text nodes, and markdown prose.
+/// Code, markup delimiters, and non-prose content are marked as `is_markup: true`
+/// so LanguageTool skips them during checking.
+///
+/// # Arguments
+/// * `language_id` - LSP language identifier (e.g., `"rust"`, `"markdown"`, `"html"`).
+///   Also accepts file extensions (e.g., `"rs"`, `"md"`, `"py"`). Falls back to
+///   plain text for unknown languages.
+/// * `content` - The full source file content to parse.
+///
+/// # Returns
+/// An [`AnnotatedText`] containing ordered text segments with byte offsets mapped
+/// back to the original content.
 pub fn parse_document(language_id: &str, content: &str) -> AnnotatedText {
     let lang = language_from_id(language_id)
         .or_else(|| language_from_extension(language_id));
@@ -37,15 +52,9 @@ pub fn parse_document(language_id: &str, content: &str) -> AnnotatedText {
     match lang {
         Some(language) => extract_text(language_id, language, content),
         None => {
-            // If it's a known non-prose language ID but we don't have a grammar,
-            // or if we are recursing, we might want to return empty.
-            // But for the top-level, defaulting to plain text is fine.
-            // Actually, let's distinguish between "plain" and "unknown".
             if language_id == "plain" || language_id == "text" || language_id == "unknown" {
                 AnnotatedText::from(content)
             } else {
-                // For Cycle 8 requirement: unknown fence language -> markup (skip)
-                // We'll use a special check in extract_markdown_text instead.
                 AnnotatedText::from(content)
             }
         }

@@ -4,6 +4,11 @@ use std::io::Write;
 use std::path::Path;
 use ltlsp_types::GrammarError;
 
+/// Manages a set of ignored words for filtering grammar errors.
+///
+/// Loads `.ltlsp-ignore` files hierarchically from the document's directory up to
+/// the workspace root. Words are stored case-insensitively (lowercased). Supports
+/// adding new words to a target ignore file and filtering errors based on ignored words.
 pub struct Dictionary {
     ignored_words: HashSet<String>,
 }
@@ -15,12 +20,27 @@ impl Default for Dictionary {
 }
 
 impl Dictionary {
+    /// Creates an empty dictionary with no ignored words.
     pub fn new() -> Self {
         Self {
             ignored_words: HashSet::new(),
         }
     }
 
+    /// Loads and merges `.ltlsp-ignore` files from `document_path` up to `workspace_root`.
+    ///
+    /// Walks the directory tree upward, reading each `.ltlsp-ignore` file found.
+    /// Lines starting with `#` are treated as comments and skipped. Empty lines are ignored.
+    /// Words are lowercased before storage.
+    ///
+    /// # Arguments
+    /// * `workspace_root` - The root directory to stop walking at. Must be an ancestor
+    ///   of (or equal to) `document_path`'s parent.
+    /// * `document_path` - Path to the source file being checked. If this is a file,
+    ///   its parent directory is used as the starting point.
+    ///
+    /// # Panics
+    /// Does not panic. File read errors are silently ignored (missing files = no words).
     pub fn load(workspace_root: &Path, document_path: &Path) -> Self {
         let mut ignored_words = HashSet::new();
         
@@ -50,10 +70,26 @@ impl Dictionary {
         Self { ignored_words }
     }
 
+    /// Checks if a word is in the ignored set (case-insensitive).
+    ///
+    /// # Arguments
+    /// * `word` - The word to check. Compared in lowercase against stored words.
     pub fn is_ignored(&self, word: &str) -> bool {
         self.ignored_words.contains(&word.to_lowercase())
     }
 
+    /// Appends a word to a `.ltlsp-ignore` file and adds it to the in-memory set.
+    ///
+    /// Creates the file if it does not exist. The word is lowercased before writing.
+    /// No duplicate check is performed on the file; duplicates are harmless since
+    /// the in-memory set deduplicates automatically.
+    ///
+    /// # Arguments
+    /// * `word` - The word to ignore. Empty strings are silently ignored.
+    /// * `target_file` - Path to the `.ltlsp-ignore` file to append to.
+    ///
+    /// # Errors
+    /// Returns `std::io::Error` if the file cannot be opened or written.
     pub fn add_word(&mut self, word: &str, target_file: &Path) -> std::io::Result<()> {
         let word = word.trim().to_lowercase();
         if word.is_empty() {
@@ -70,6 +106,19 @@ impl Dictionary {
         Ok(())
     }
 
+    /// Filters out grammar errors whose matched word is in the ignored set.
+    ///
+    /// Extracts the word from `text` using each error's `offset` and `length`,
+    /// then checks it against the ignored set. Errors with out-of-bounds offsets
+    /// are kept (not filtered).
+    ///
+    /// # Arguments
+    /// * `text` - The plain text string that LanguageTool checked. Offsets in errors
+    ///   are relative to this string.
+    /// * `errors` - Grammar errors to filter. Consumed by this function.
+    ///
+    /// # Returns
+    /// A new `Vec` containing only errors whose matched word is not ignored.
     pub fn filter_errors(&self, text: &str, errors: Vec<GrammarError>) -> Vec<GrammarError> {
         errors.into_iter().filter(|error| {
             if error.offset + error.length > text.len() {

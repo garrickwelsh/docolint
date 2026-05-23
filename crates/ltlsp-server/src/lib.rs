@@ -19,6 +19,12 @@ use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 use url::Url;
 
+/// Returns the server's capabilities as a JSON value.
+///
+/// Advertises support for:
+/// - Full text document sync (open/close + full content on change)
+/// - Code action provider (for quick fixes and ignore-word actions)
+/// - Execute command provider (`ltlsp.ignoreWord`)
 pub fn server_capabilities() -> serde_json::Value {
     serde_json::to_value(ServerCapabilities {
         text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Options(
@@ -38,6 +44,22 @@ pub fn server_capabilities() -> serde_json::Value {
     .unwrap()
 }
 
+/// Generates "ignore word" code actions for each `.ltlsp-ignore` file between
+/// the document and the workspace root.
+///
+/// Each action, when executed by the editor, sends a `ltlsp.ignoreWord` command
+/// with the word and target file path.
+///
+/// # Arguments
+/// * `workspace_root` - Root of the workspace. Used to label the root-level action.
+/// * `document_path` - Path to the source file being edited. Walking starts from
+///   this file's parent directory.
+/// * `word` - The word to offer ignoring.
+/// * `uri` - The document's LSP URI, passed to the command for rechecking after ignore.
+///
+/// # Returns
+/// A vector of `CodeActionOrCommand`, one per directory level up to (and including)
+/// the workspace root.
 pub fn generate_ignore_actions(
     workspace_root: &Path,
     document_path: &Path,
@@ -86,6 +108,18 @@ pub fn generate_ignore_actions(
     actions
 }
 
+/// Generates replacement code actions from a diagnostic's suggested replacements.
+///
+/// The first replacement is marked as `is_preferred` for editor auto-selection.
+///
+/// # Arguments
+/// * `diag` - The LSP diagnostic containing replacement data in its `data` field.
+///   Expected format: `{ "replacements": ["word1", "word2", ...] }`.
+/// * `uri` - The document URI to apply the text edit to.
+/// * `_content` - Unused. Reserved for future context-aware filtering.
+///
+/// # Returns
+/// A vector of `CodeActionOrCommand`, one per replacement. Empty if no replacements exist.
 pub fn generate_replacement_actions(
     diag: &Diagnostic,
     uri: &lsp_types::Uri,
@@ -140,6 +174,20 @@ pub fn generate_replacement_actions(
 
 use ltlsp_types::AnnotatedText;
 
+/// Maps a LanguageTool offset (relative to plain text) to an absolute byte offset
+/// in the original source file.
+///
+/// Iterates through non-markup segments, accumulating their lengths until the
+/// `lt_offset` falls within the current segment. Returns the segment's original
+/// offset plus the offset within that segment.
+///
+/// # Arguments
+/// * `text` - The `AnnotatedText` used in the LanguageTool request.
+/// * `lt_offset` - Byte offset relative to the concatenated plain text.
+///
+/// # Returns
+/// `Some(absolute_offset)` if the offset maps to a valid non-markup segment,
+/// `None` if the offset falls outside all segments or within markup.
 pub fn map_lt_offset_to_absolute(text: &AnnotatedText, lt_offset: usize) -> Option<usize> {
     let mut current_lt_offset = 0;
     for segment in &text.segments {
@@ -156,6 +204,18 @@ pub fn map_lt_offset_to_absolute(text: &AnnotatedText, lt_offset: usize) -> Opti
     None
 }
 
+/// Converts a byte offset in source content to an LSP `Position` (line, character).
+///
+/// Lines and characters are 0-indexed. Handles multi-byte UTF-8 characters correctly
+/// by iterating with `char_indices`.
+///
+/// # Arguments
+/// * `content` - The full source file content.
+/// * `offset` - Byte offset within `content`. If `offset` exceeds content length,
+///   returns the position at the end of the file.
+///
+/// # Returns
+/// An LSP `Position` with `line` and `character` fields.
 pub fn offset_to_position(content: &str, offset: usize) -> lsp_types::Position {
     let mut line = 0;
     let mut character = 0;
@@ -173,21 +233,44 @@ pub fn offset_to_position(content: &str, offset: usize) -> lsp_types::Position {
     lsp_types::Position { line, character }
 }
 
+/// Holds all mutable state for the LSP server runtime.
+///
+/// Tracks open documents, their content, versions, languages, and cached errors.
+/// Manages async task handles for debounced grammar checks and implements a simple
+/// error cooldown to avoid spamming the LanguageTool server on repeated failures.
 pub struct ServerState {
+    /// HTTP client for LanguageTool API calls.
     pub client: LanguageToolClient,
+    /// Maps document URIs to their latest known version numbers.
     pub document_versions: HashMap<String, i32>,
+    /// Maps document URIs to their full text content.
     pub document_content: HashMap<String, String>,
+    /// Maps document URIs to their LSP language IDs.
     pub document_languages: HashMap<String, String>,
+    /// Maps document URIs to their latest raw grammar errors (pre-dictionary filter).
     pub document_errors: HashMap<String, Vec<GrammarError>>,
+    /// Maps document URIs to their in-flight async check task handles.
+    /// Used for cancellation when a document changes before the previous check completes.
     pub in_flight_tasks: HashMap<String, JoinHandle<()>>,
+    /// Timestamp of the last LanguageTool error, used for cooldown tracking.
     pub last_error_time: Option<Instant>,
+    /// Duration to wait after an error before retrying. Defaults to 60 seconds.
     pub error_cooldown: Duration,
+    /// Root path of the workspace, used for dictionary loading and ignore actions.
     pub workspace_root: Option<PathBuf>,
+    /// Whether this server instance started a LanguageTool Docker container.
     pub started_lt: bool,
+    /// Whether to stop the LanguageTool Docker container on server shutdown.
     pub stop_on_exit: bool,
 }
 
 impl ServerState {
+    /// Creates a new server state with the given LanguageTool client.
+    ///
+    /// All document maps are initialized empty. `error_cooldown` defaults to 60 seconds.
+    ///
+    /// # Arguments
+    /// * `client` - The LanguageTool HTTP client to use for grammar checks.
     pub fn new(client: LanguageToolClient) -> Self {
         Self {
             client,
@@ -204,10 +287,13 @@ impl ServerState {
         }
     }
 
+    /// Records the current time as the last error timestamp.
+    /// Triggers the cooldown period for subsequent check attempts.
     pub fn mark_error(&mut self) {
         self.last_error_time = Some(Instant::now());
     }
 
+    /// Returns `true` if the server is currently in the error cooldown period.
     pub fn is_cooling_down(&self) -> bool {
         if let Some(last_error) = self.last_error_time {
             last_error.elapsed() < self.error_cooldown
@@ -216,26 +302,46 @@ impl ServerState {
         }
     }
 
+    /// Updates the version number for a document.
+    ///
+    /// # Arguments
+    /// * `uri` - Document URI string.
+    /// * `version` - New version number from the LSP notification.
     pub fn update_version(&mut self, uri: String, version: i32) {
         self.document_versions.insert(uri, version);
     }
 
+    /// Cancels any in-flight async task for the given document URI.
+    ///
+    /// # Arguments
+    /// * `uri` - Document URI string. If no task exists for this URI, this is a no-op.
     pub fn cancel_task(&mut self, uri: &str) {
         if let Some(handle) = self.in_flight_tasks.remove(uri) {
             handle.abort();
         }
     }
 
+    /// Registers a new async task for a document, cancelling any existing task first.
+    ///
+    /// # Arguments
+    /// * `uri` - Document URI string.
+    /// * `handle` - The `JoinHandle` of the spawned async task.
     pub fn register_task(&mut self, uri: String, handle: JoinHandle<()>) {
         self.cancel_task(&uri);
         self.in_flight_tasks.insert(uri, handle);
     }
 }
 
+/// Deserialized from `InitializeParams.initialization_options`.
+///
+/// Allows clients to configure the LanguageTool endpoint and container lifecycle behavior.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InitializationOptions {
+    /// URL of the LanguageTool server. Defaults to `http://localhost:8081` if not provided.
     pub endpoint: Option<String>,
+    /// When `true`, stops the auto-started LanguageTool Docker container on shutdown.
+    /// Defaults to `false` if not provided.
     pub stop_on_exit: Option<bool>,
 }
 
@@ -443,6 +549,23 @@ fn spawn_check(
     state.write().unwrap().register_task(uri, handle);
 }
 
+/// Main server entry point. Runs the LSP event loop on the given connection.
+///
+/// Initializes server state, probes for LanguageTool availability (auto-starts Docker
+/// if unreachable), then blocks on the connection receiver processing LSP messages:
+/// - `textDocument/didOpen`, `didChange`: spawns debounced async grammar checks
+/// - `textDocument/didClose`: cancels pending tasks and clears document state
+/// - `textDocument/codeAction`: generates replacement and ignore-word quick fixes
+/// - `workspace/executeCommand`: handles `ltlsp.ignoreWord` to add words to `.ltlsp-ignore`
+///
+/// # Arguments
+/// * `connection` - The LSP stdio connection from the editor.
+/// * `params` - Initialization parameters from the editor, including optional
+///   `InitializationOptions` for endpoint and container lifecycle config.
+///
+/// # Errors
+/// Returns an error if the connection fails or the message loop encounters an
+/// unrecoverable issue.
 pub async fn run(
     connection: Connection,
     params: InitializeParams,
