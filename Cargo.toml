@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.dependencies]
-serde = "1.0.228"
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
-reqwest = { version = "0.13.3", features = ["json"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "form", "rustls", "http2", "system-proxy", "charset"] }
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
