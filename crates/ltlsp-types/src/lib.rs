@@ -14,6 +14,8 @@ pub struct TextSegment {
     pub text: String,
     #[serde(rename = "markup")]
     pub is_markup: bool,
+    #[serde(skip)]
+    pub offset: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +29,7 @@ impl From<&str> for AnnotatedText {
             segments: vec![TextSegment {
                 text: text.to_string(),
                 is_markup: false,
+                offset: 0,
             }],
         }
     }

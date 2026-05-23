@@ -181,11 +181,11 @@ mod tests {
 
         let text = AnnotatedText {
             segments: vec![
-                TextSegment { text: "Hello ".to_string(), is_markup: false },
-                TextSegment { text: "<b>".to_string(), is_markup: true },
-                TextSegment { text: "wurld".to_string(), is_markup: false },
-                TextSegment { text: "</b>".to_string(), is_markup: true },
-                TextSegment { text: "!".to_string(), is_markup: false },
+                TextSegment { text: "Hello ".to_string(), is_markup: false, offset: 0 },
+                TextSegment { text: "<b>".to_string(), is_markup: true, offset: 6 },
+                TextSegment { text: "wurld".to_string(), is_markup: false, offset: 9 },
+                TextSegment { text: "</b>".to_string(), is_markup: true, offset: 14 },
+                TextSegment { text: "!".to_string(), is_markup: false, offset: 18 },
             ],
         };
 
@@ -201,11 +201,11 @@ mod tests {
     fn test_plain_text_extraction() {
         let text = AnnotatedText {
             segments: vec![
-                TextSegment { text: "Hello ".to_string(), is_markup: false },
-                TextSegment { text: "<b>".to_string(), is_markup: true },
-                TextSegment { text: "world".to_string(), is_markup: false },
-                TextSegment { text: "</b>".to_string(), is_markup: true },
-                TextSegment { text: "!".to_string(), is_markup: false },
+                TextSegment { text: "Hello ".to_string(), is_markup: false, offset: 0 },
+                TextSegment { text: "<b>".to_string(), is_markup: true, offset: 6 },
+                TextSegment { text: "world".to_string(), is_markup: false, offset: 9 },
+                TextSegment { text: "</b>".to_string(), is_markup: true, offset: 14 },
+                TextSegment { text: "!".to_string(), is_markup: false, offset: 18 },
             ],
         };
         assert_eq!(text.plain_text(), "Hello world!");

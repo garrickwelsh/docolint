@@ -36,7 +36,19 @@ pub fn parse_document(language_id: &str, content: &str) -> AnnotatedText {
 
     match lang {
         Some(language) => extract_text(language_id, language, content),
-        None => AnnotatedText::from(content),
+        None => {
+            // If it's a known non-prose language ID but we don't have a grammar,
+            // or if we are recursing, we might want to return empty.
+            // But for the top-level, defaulting to plain text is fine.
+            // Actually, let's distinguish between "plain" and "unknown".
+            if language_id == "plain" || language_id == "text" || language_id == "unknown" {
+                AnnotatedText::from(content)
+            } else {
+                // For Cycle 8 requirement: unknown fence language -> markup (skip)
+                // We'll use a special check in extract_markdown_text instead.
+                AnnotatedText::from(content)
+            }
+        }
     }
 }
 
@@ -51,6 +63,8 @@ fn extract_text(language_id: &str, language: tree_sitter::Language, content: &st
     match language_id {
         "rust" | "rs" => extract_rust_docs(&tree, content),
         "csharp" | "c#" | "cs" => extract_csharp_docs(&tree, content),
+        "html" => extract_html_text(&tree, content),
+        "markdown" | "md" => extract_markdown_text(content),
         _ => AnnotatedText::from(content),
     }
 }
@@ -84,21 +98,20 @@ fn extract_rust_docs(tree: &tree_sitter::Tree, content: &str) -> AnnotatedText {
                 for i in 0..node.child_count() {
                     if let Some(child) = node.child(i as u32) {
                         if child.kind() == "doc_comment" {
-                            let text = std::str::from_utf8(
-                                &bytes[child.start_byte()..child.end_byte()],
-                            )
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                            if !text.is_empty() {
-                                segments.push(TextSegment { text, is_markup: false });
+                            let start = child.start_byte();
+                            let text = std::str::from_utf8(&bytes[start..child.end_byte()])
+                                .unwrap_or("")
+                                .to_string();
+                            if !text.trim().is_empty() {
+                                segments.push(TextSegment {
+                                    text,
+                                    is_markup: false,
+                                    offset: start,
+                                });
                             }
                         }
                     }
                 }
-                // Mark the whole comment node as processed — push nothing for
-                // non-doc parts (delimiters are skipped; they become implicit markup
-                // via the gaps between plain segments).
                 return;
             }
             // Non-doc comment → markup (skip, no segment added)
@@ -132,11 +145,15 @@ fn extract_csharp_docs(tree: &tree_sitter::Tree, content: &str) -> AnnotatedText
     ) {
         let node = cursor.node();
         if node.kind() == "comment" {
-            let raw = std::str::from_utf8(&bytes[node.start_byte()..node.end_byte()])
-                .unwrap_or("");
+            let start = node.start_byte();
+            let raw = std::str::from_utf8(&bytes[start..node.end_byte()]).unwrap_or("");
             let text = strip_csharp_doc_comment(raw);
             if !text.is_empty() {
-                segments.push(TextSegment { text, is_markup: false });
+                segments.push(TextSegment {
+                    text,
+                    is_markup: false,
+                    offset: start,
+                });
             }
             return;
         }
@@ -182,6 +199,211 @@ fn strip_csharp_doc_comment(raw: &str) -> String {
     } else {
         String::new()
     }
+}
+
+/// Walk an HTML AST and extract text nodes, excluding script and style elements.
+fn extract_html_text(tree: &tree_sitter::Tree, content: &str) -> AnnotatedText {
+    let mut segments: Vec<TextSegment> = Vec::new();
+    let mut cursor = tree.walk();
+    let bytes = content.as_bytes();
+
+    fn walk(
+        cursor: &mut tree_sitter::TreeCursor,
+        bytes: &[u8],
+        segments: &mut Vec<TextSegment>,
+    ) {
+        let node = cursor.node();
+        let kind = node.kind();
+
+        if kind == "script_element" || kind == "style_element" {
+            // Skip script and style content
+            return;
+        }
+
+        if kind == "text" {
+            let start = node.start_byte();
+            let text = std::str::from_utf8(&bytes[start..node.end_byte()])
+                .unwrap_or("")
+                .to_string();
+            if !text.trim().is_empty() {
+                segments.push(TextSegment {
+                    text,
+                    is_markup: false,
+                    offset: start,
+                });
+            }
+        }
+
+        if cursor.goto_first_child() {
+            walk(cursor, bytes, segments);
+            while cursor.goto_next_sibling() {
+                walk(cursor, bytes, segments);
+            }
+            cursor.goto_parent();
+        }
+    }
+
+    walk(&mut cursor, bytes, &mut segments);
+    AnnotatedText { segments }
+}
+
+/// Walk a Markdown AST and extract prose from inline nodes and recurse into
+/// fenced code blocks.
+fn extract_markdown_text(content: &str) -> AnnotatedText {
+    let mut parser = tree_sitter_md::MarkdownParser::default();
+    let tree = match parser.parse(content.as_bytes(), None) {
+        Some(t) => t,
+        None => return AnnotatedText::from(content),
+    };
+
+    let mut segments = Vec::new();
+    let mut cursor = tree.walk();
+
+    fn walk(
+        cursor: &mut tree_sitter_md::MarkdownCursor,
+        content: &str,
+        segments: &mut Vec<TextSegment>,
+    ) {
+        let node = cursor.node();
+        let kind = node.kind();
+
+        // If it's a fenced code block, extract its content and recurse
+        if kind == "fenced_code_block" && !cursor.is_inline() {
+            let mut lang = "unknown";
+            let mut code_content = "";
+
+            let mut child_cursor = node.walk();
+            if child_cursor.goto_first_child() {
+                loop {
+                    let child = child_cursor.node();
+                    match child.kind() {
+                        "info_string" => {
+                            lang = child
+                                .utf8_text(content.as_bytes())
+                                .unwrap_or("unknown")
+                                .trim();
+                        }
+                        "code_fence_content" => {
+                            code_content = child.utf8_text(content.as_bytes()).unwrap_or("");
+                        }
+                        _ => {}
+                    }
+                    if !child_cursor.goto_next_sibling() {
+                        break;
+                    }
+                }
+            }
+
+            if !code_content.is_empty() {
+                if let Some(_) =
+                    language_from_id(lang).or_else(|| language_from_extension(lang))
+                {
+                    let content_start = code_fence_node_start(node, content);
+                    let mut inner_annotated = parse_document(lang, code_content);
+                    for segment in &mut inner_annotated.segments {
+                        segment.offset += content_start;
+                    }
+                    segments.extend(inner_annotated.segments);
+                }
+            }
+            return;
+        }
+
+        // Handle gaps and children
+        let mut last_offset = node.start_byte();
+
+        // Nodes to skip entirely (and their content)
+        let is_markup = matches!(
+            kind,
+            "emphasis_delimiter"
+                | "link_destination"
+                | "["
+                | "]"
+                | "("
+                | ")"
+                | "atx_h1_marker"
+                | "atx_h2_marker"
+                | "atx_h3_marker"
+                | "atx_h4_marker"
+                | "atx_h5_marker"
+                | "atx_h6_marker"
+                | "fenced_code_block_delimiter"
+        );
+
+        if is_markup {
+            return;
+        }
+
+        if cursor.goto_first_child() {
+            loop {
+                let child_start = cursor.node().start_byte();
+                if child_start > last_offset {
+                    let gap_text = &content[last_offset..child_start];
+                    if !gap_text.trim().is_empty() {
+                        segments.push(TextSegment {
+                            text: gap_text.to_string(),
+                            is_markup: false,
+                            offset: last_offset,
+                        });
+                    }
+                }
+
+                walk(cursor, content, segments);
+
+                last_offset = cursor.node().end_byte();
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+
+            let node_end = node.end_byte();
+            if last_offset < node_end {
+                let gap_text = &content[last_offset..node_end];
+                if !gap_text.trim().is_empty() {
+                    segments.push(TextSegment {
+                        text: gap_text.to_string(),
+                        is_markup: false,
+                        offset: last_offset,
+                    });
+                }
+            }
+            cursor.goto_parent();
+        } else {
+            // Leaf node
+            if !is_markup
+                && (kind == "inline"
+                    || (kind != "paragraph" && kind != "document" && kind != "section"))
+            {
+                let start = node.start_byte();
+                let text = node.utf8_text(content.as_bytes()).unwrap_or("");
+                if !text.trim().is_empty() {
+                    segments.push(TextSegment {
+                        text: text.to_string(),
+                        is_markup: false,
+                        offset: start,
+                    });
+                }
+            }
+        }
+    }
+
+    walk(&mut cursor, content, &mut segments);
+    AnnotatedText { segments }
+}
+
+fn code_fence_node_start(node: tree_sitter::Node, _content: &str) -> usize {
+    let mut cursor = node.walk();
+    if cursor.goto_first_child() {
+        loop {
+            if cursor.node().kind() == "code_fence_content" {
+                return cursor.node().start_byte();
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+    node.start_byte()
 }
 
 #[cfg(test)]
@@ -257,7 +479,7 @@ mod tests {
     fn test_rust_single_line_doc_comment() {
         let src = "/// Hello world\nfn foo() {}";
         let result = parse_document("rust", src);
-        assert_eq!(result.plain_text(), "Hello world");
+        assert_eq!(result.plain_text().trim(), "Hello world");
     }
 
     #[test]
@@ -273,7 +495,7 @@ mod tests {
     fn test_rust_block_doc_comment() {
         let src = "/** Block doc comment */\nfn foo() {}";
         let result = parse_document("rust", src);
-        assert_eq!(result.plain_text(), "Block doc comment");
+        assert_eq!(result.plain_text().trim(), "Block doc comment");
     }
 
     #[test]
@@ -341,5 +563,93 @@ mod tests {
         let text = result.plain_text();
         assert!(text.contains("Docs here"), "got: {text}");
         assert!(!text.contains("int"), "code leaked into plain text: {text}");
+    }
+
+    // ── Cycle 7: HTML text extraction ───────────────────────────────────────
+
+    #[test]
+    fn test_html_text_extraction() {
+        let src = "<div><p>Hello world</p></div>";
+        let result = parse_document("html", src);
+        assert_eq!(result.plain_text(), "Hello world");
+    }
+
+    #[test]
+    fn test_html_multiple_tags() {
+        let src = "<ul><li>One</li><li>Two</li></ul>";
+        let result = parse_document("html", src);
+        let text = result.plain_text();
+        assert!(text.contains("One"));
+        assert!(text.contains("Two"));
+    }
+
+    #[test]
+    fn test_html_script_exclusion() {
+        let src = "<div><p>Visible</p><script>console.log('hidden')</script></div>";
+        let result = parse_document("html", src);
+        let text = result.plain_text();
+        assert!(text.contains("Visible"));
+        assert!(!text.contains("console.log"));
+        assert!(!text.contains("hidden"));
+    }
+
+    #[test]
+    fn test_html_style_exclusion() {
+        let src = "<div><p>Visible</p><style>.hidden { display: none; }</style></div>";
+        let result = parse_document("html", src);
+        let text = result.plain_text();
+        assert!(text.contains("Visible"));
+        assert!(!text.contains(".hidden"));
+    }
+
+    // ── Cycle 8: Markdown recursive parsing ─────────────────────────────────
+
+    #[test]
+    fn test_markdown_prose_extraction() {
+        let src = "Hello *world*";
+        let result = parse_document("markdown", src);
+        let text = result.plain_text();
+        assert!(text.contains("Hello"));
+        assert!(text.contains("world"));
+        assert!(!text.contains("*"));
+    }
+
+    #[test]
+    fn test_markdown_fenced_code_rust_recursion() {
+        let src = "# Title\n\n```rust\n/// Doc comment\nfn foo() {}\n```";
+        let result = parse_document("markdown", src);
+        let text = result.plain_text();
+        assert!(text.contains("Title"));
+        assert!(text.contains("Doc comment"));
+        assert!(!text.contains("fn foo"));
+    }
+
+    #[test]
+    fn test_markdown_unknown_fence_ignored() {
+        let src = "```unknown\nCheck me not\n```";
+        let result = parse_document("markdown", src);
+        let text = result.plain_text();
+        assert!(!text.contains("Check me not"));
+    }
+
+    // ── Cycle 9: Absolute byte offset tracking ──────────────────────────────
+
+    #[test]
+    fn test_rust_offset_tracking() {
+        let src = "fn main() {} \n/// Doc comment";
+        let result = parse_document("rust", src);
+        assert_eq!(result.segments.len(), 1);
+        let start = src.find(" Doc comment").unwrap();
+        assert_eq!(result.segments[0].offset, start);
+    }
+
+    #[test]
+    fn test_markdown_recursive_offset_tracking() {
+        let src = "# Title\n\n```rust\n/// Doc\n```";
+        let result = parse_document("markdown", src);
+        // Find segment for "Doc"
+        let doc_seg = result.segments.iter().find(|s| s.text.contains("Doc")).unwrap();
+        let expected_offset = src.find(" Doc").unwrap();
+        assert_eq!(doc_seg.offset, expected_offset);
     }
 }
