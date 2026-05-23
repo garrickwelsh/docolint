@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GrammarError {
@@ -7,6 +7,39 @@ pub struct GrammarError {
     pub length: usize,
     pub replacements: Vec<String>,
     pub rule_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TextSegment {
+    pub text: String,
+    #[serde(rename = "markup")]
+    pub is_markup: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnnotatedText {
+    pub segments: Vec<TextSegment>,
+}
+
+impl From<&str> for AnnotatedText {
+    fn from(text: &str) -> Self {
+        AnnotatedText {
+            segments: vec![TextSegment {
+                text: text.to_string(),
+                is_markup: false,
+            }],
+        }
+    }
+}
+
+impl AnnotatedText {
+    pub fn plain_text(&self) -> String {
+        self.segments
+            .iter()
+            .filter(|s| !s.is_markup)
+            .map(|s| s.text.as_str())
+            .collect()
+    }
 }
 
 pub struct ClientConfig {
@@ -30,9 +63,23 @@ impl LanguageToolClient {
         &self.config.base_url
     }
 
-    pub async fn check(&self, text: &str) -> Result<Vec<GrammarError>, reqwest::Error> {
+    pub async fn check(&self, text: AnnotatedText) -> Result<Vec<GrammarError>, reqwest::Error> {
         let url = format!("{}/v2/check", self.config.base_url);
-        let params = [("language", "en-US"), ("text", text)];
+        let has_markup = text.segments.iter().any(|s| s.is_markup);
+
+        let params: Vec<(&str, String)> = if has_markup {
+            let data = serde_json::json!({ "annotation": text.segments });
+            vec![
+                ("language", "en-US".to_string()),
+                ("data", data.to_string()),
+            ]
+        } else {
+            vec![
+                ("language", "en-US".to_string()),
+                ("text", text.plain_text()),
+            ]
+        };
+
         let resp = self.client.post(&url).form(&params).send().await?;
         let lt_resp: LTCheckResponse = resp.json().await?;
         Ok(lt_resp.matches.into_iter().map(GrammarError::from).collect())
@@ -100,27 +147,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_simple_string() {
+    async fn test_check_multiple_matches() {
+        let mock_server = MockServer::start().await;
+
+        let sample_response = serde_json::json!({
+            "matches": [
+                {
+                    "message": "Possible spelling mistake found.",
+                    "shortMessage": "Spelling mistake",
+                    "replacements": [{"value": "teh"}, {"value": "the"}],
+                    "offset": 5,
+                    "length": 3,
+                    "rule": {"id": "MORFOLOGIK_RULE_EN_US"}
+                },
+                {
+                    "message": "A grammatical problem.",
+                    "shortMessage": "Grammar",
+                    "replacements": [{"value": "was"}],
+                    "offset": 20,
+                    "length": 4,
+                    "rule": {"id": "SOME_GRAMMAR_RULE"}
+                }
+            ]
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/v2/check"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&sample_response))
+            .mount(&mock_server)
+            .await;
+
+        let config = ClientConfig {
+            base_url: mock_server.uri(),
+        };
+        let client = LanguageToolClient::new(config);
+        let text = AnnotatedText::from("some tezt with a agrammatical isue.");
+        let errors = client.check(text).await.unwrap();
+
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0].rule_id, "MORFOLOGIK_RULE_EN_US");
+        assert_eq!(errors[0].offset, 5);
+        assert_eq!(errors[0].replacements, vec!["teh", "the"]);
+        assert_eq!(errors[1].rule_id, "SOME_GRAMMAR_RULE");
+        assert_eq!(errors[1].offset, 20);
+        assert_eq!(errors[1].replacements, vec!["was"]);
+    }
+
+    #[tokio::test]
+    async fn test_check_annotated_text() {
         let mock_server = MockServer::start().await;
 
         let sample_response = serde_json::json!({
             "matches": [{
                 "message": "Possible spelling mistake found.",
                 "shortMessage": "Spelling mistake",
-                "replacements": [{"value": "test"}],
-                "offset": 10,
+                "replacements": [{"value": "world"}],
+                "offset": 6,
                 "length": 5,
-                "context": {"text": "This is a testt.", "offset": 10, "length": 5},
-                "sentence": "This is a testt.",
-                "type": {"typeName": "UnknownWord"},
-                "rule": {
-                    "id": "MORFOLOGIK_RULE_EN_US",
-                    "description": "Possible spelling mistake",
-                    "issueType": "misspelling",
-                    "category": {"id": "TYPOS", "name": "Possible Typo"}
-                },
-                "ignoreForIncompleteSentence": false,
-                "contextForSureMatch": 0
+                "rule": {"id": "MORFOLOGIK_RULE_EN_US"}
             }]
         });
 
@@ -134,13 +218,44 @@ mod tests {
             base_url: mock_server.uri(),
         };
         let client = LanguageToolClient::new(config);
-        let errors = client.check("This is a testt.").await.unwrap();
+
+        let text = AnnotatedText {
+            segments: vec![
+                TextSegment { text: "Hello ".to_string(), is_markup: false },
+                TextSegment { text: "<b>".to_string(), is_markup: true },
+                TextSegment { text: "wurld".to_string(), is_markup: false },
+                TextSegment { text: "</b>".to_string(), is_markup: true },
+                TextSegment { text: "!".to_string(), is_markup: false },
+            ],
+        };
+
+        let errors = client.check(text).await.unwrap();
 
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].message, "Possible spelling mistake found.");
-        assert_eq!(errors[0].offset, 10);
+        assert_eq!(errors[0].offset, 6);
         assert_eq!(errors[0].length, 5);
-        assert_eq!(errors[0].replacements, vec!["test"]);
-        assert_eq!(errors[0].rule_id, "MORFOLOGIK_RULE_EN_US");
+        assert_eq!(errors[0].replacements, vec!["world"]);
+    }
+
+    #[test]
+    fn test_plain_text_extraction() {
+        let text = AnnotatedText {
+            segments: vec![
+                TextSegment { text: "Hello ".to_string(), is_markup: false },
+                TextSegment { text: "<b>".to_string(), is_markup: true },
+                TextSegment { text: "world".to_string(), is_markup: false },
+                TextSegment { text: "</b>".to_string(), is_markup: true },
+                TextSegment { text: "!".to_string(), is_markup: false },
+            ],
+        };
+        assert_eq!(text.plain_text(), "Hello world!");
+    }
+
+    #[test]
+    fn test_from_str() {
+        let text = AnnotatedText::from("hello");
+        assert_eq!(text.segments.len(), 1);
+        assert!(!text.segments[0].is_markup);
+        assert_eq!(text.segments[0].text, "hello");
     }
 }
