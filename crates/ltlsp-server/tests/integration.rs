@@ -82,6 +82,11 @@ async fn test_did_open_diagnostic_flow() {
                     }
                     assert_eq!(diag.range.start.line, 0);
                     assert!(diag.range.start.character > 0);
+                    let data = diag.data.as_ref().expect("diagnostic data is missing");
+                    assert_eq!(data["rule_id"].as_str(), Some("MORFOLOGIK_RULE_EN_US"));
+                    let replacements = data["replacements"].as_array().expect("replacements should be an array");
+                    assert!(!replacements.is_empty(), "replacements should not be empty");
+                    assert_eq!(replacements[0].as_str(), Some("test"));
                     found_diagnostic = true;
                     break;
                 }
