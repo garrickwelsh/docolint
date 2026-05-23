@@ -10,5 +10,5 @@ lt-pull:
     docker pull ghcr.io/garrickwelsh/languagetool
 
 lt-server:
-    docker run -d -p 8081:8081 --name ltlsp-lt-server ghcr.io/garrickwelsh/languagetool
+    docker run -d --network host --name ltlsp-lt-server ghcr.io/garrickwelsh/languagetool
 

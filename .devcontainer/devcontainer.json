@@ -1,5 +1,5 @@
 {
-  "image": "ghcr.io/garrickwelsh/devcontainer-rust:20260522.10.20.35",
+  "image": "ghcr.io/garrickwelsh/devcontainer-rust:20260522.12.53.17",
   "remoteEnv": {
     "PODMAN_USERNS": "keep-id"
   },
