@@ -1,0 +1,11 @@
+[package]
+name = "ltlsp-dictionary"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ltlsp-types = { path = "../ltlsp-types" }
+serde = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
