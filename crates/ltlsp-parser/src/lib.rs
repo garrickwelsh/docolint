@@ -96,19 +96,17 @@ fn extract_rust_docs(tree: &tree_sitter::Tree, content: &str) -> AnnotatedText {
             if has_doc_marker {
                 // Extract doc_comment child text (the actual prose)
                 for i in 0..node.child_count() {
-                    if let Some(child) = node.child(i as u32) {
-                        if child.kind() == "doc_comment" {
-                            let start = child.start_byte();
-                            let text = std::str::from_utf8(&bytes[start..child.end_byte()])
-                                .unwrap_or("")
-                                .to_string();
-                            if !text.trim().is_empty() {
-                                segments.push(TextSegment {
-                                    text,
-                                    is_markup: false,
-                                    offset: start,
-                                });
-                            }
+                    if let Some(child) = node.child(i as u32).filter(|c| c.kind() == "doc_comment") {
+                        let start = child.start_byte();
+                        let text = std::str::from_utf8(&bytes[start..child.end_byte()])
+                            .unwrap_or("")
+                            .to_string();
+                        if !text.trim().is_empty() {
+                            segments.push(TextSegment {
+                                text,
+                                is_markup: false,
+                                offset: start,
+                            });
                         }
                     }
                 }
@@ -294,9 +292,8 @@ fn extract_markdown_text(content: &str) -> AnnotatedText {
                 }
             }
 
-            if !code_content.is_empty() {
-                if let Some(_) =
-                    language_from_id(lang).or_else(|| language_from_extension(lang))
+                if !code_content.is_empty()
+                    && (language_from_id(lang).is_some() || language_from_extension(lang).is_some())
                 {
                     let content_start = code_fence_node_start(node, content);
                     let mut inner_annotated = parse_document(lang, code_content);
@@ -305,7 +302,6 @@ fn extract_markdown_text(content: &str) -> AnnotatedText {
                     }
                     segments.extend(inner_annotated.segments);
                 }
-            }
             return;
         }
 

@@ -8,6 +8,12 @@ pub struct Dictionary {
     ignored_words: HashSet<String>,
 }
 
+impl Default for Dictionary {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Dictionary {
     pub fn new() -> Self {
         Self {
@@ -26,13 +32,11 @@ impl Dictionary {
 
         while let Some(path) = current {
             let ignore_file = path.join(".ltlsp-ignore");
-            if ignore_file.exists() {
-                if let Ok(content) = fs::read_to_string(ignore_file) {
-                    for line in content.lines() {
-                        let word = line.trim();
-                        if !word.is_empty() && !word.starts_with('#') {
-                            ignored_words.insert(word.to_lowercase());
-                        }
+            if let Ok(content) = fs::read_to_string(ignore_file) {
+                for line in content.lines() {
+                    let word = line.trim();
+                    if !word.is_empty() && !word.starts_with('#') {
+                        ignored_words.insert(word.to_lowercase());
                     }
                 }
             }

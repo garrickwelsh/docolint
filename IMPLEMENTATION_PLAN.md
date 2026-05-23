@@ -42,35 +42,35 @@ Parse flow for text extraction:
 3. Fenced code blocks: extract language tag + content → recurse into language-specific
    sub-parser (unknown/unsupported language → treat entire block as **markup**, skip)
 
-- [ ] **TDD Cycle 5**: Test mapping `languageId` and file extensions to the statically linked grammars.
-- [ ] **TDD Cycle 6**: Test extracting single-line and multi-line doc comments in Rust.
-- [ ] **TDD Cycle 7**: Test extraction of text from HTML tags (`<p>`, `<div>`, `<li>`) and exclusion of `<script>`/`<style>`.
-- [ ] **TDD Cycle 8**: Test recursive parsing via `MarkdownParser`: prose `inline` nodes extracted as text, fenced code blocks recursed into language-specific sub-parser (Rust doc comments extracted), unknown fence language treated as markup (skipped).
-- [ ] **TDD Cycle 9**: Test that extracted text snippets track their **absolute byte offset** from the root document to simplify translation later.
+- [x] **TDD Cycle 5**: Test mapping `languageId` and file extensions to the statically linked grammars.
+- [x] **TDD Cycle 6**: Test extracting single-line and multi-line doc comments in Rust.
+- [x] **TDD Cycle 7**: Test extraction of text from HTML tags (`<p>`, `<div>`, `<li>`) and exclusion of `<script>`/`<style>`.
+- [x] **TDD Cycle 8**: Test recursive parsing via `MarkdownParser`: prose `inline` nodes extracted as text, fenced code blocks recursed into language-specific sub-parser (Rust doc comments extracted), unknown fence language treated as markup (skipped).
+- [x] **TDD Cycle 9**: Test that extracted text snippets track their **absolute byte offset** from the root document to simplify translation later.
 
 ## Phase 3: `dictionary` Module (Local Truth)
 Focus: Managing multiple `.ltlsp-ignore` files.
 Public Interface: `pub struct Dictionary`, `pub fn load(workspace_root: PathBuf, document_path: PathBuf)`, `pub fn is_ignored(&self, word: &str) -> bool`, `pub fn add_word(&self, word: &str, target_file: PathBuf)`
 
-- [ ] **TDD Cycle 10**: Test discovering and merging words from multiple `.ltlsp-ignore` files (workspace root + local module).
-- [ ] **TDD Cycle 11**: Test creating a new `.ltlsp-ignore` in the workspace root if none exists.
-- [ ] **TDD Cycle 12**: Test filtering a list of `GrammarError` to remove matches for ignored words.
+- [x] **TDD Cycle 10**: Test discovering and merging words from multiple `.ltlsp-ignore` files (workspace root + local module).
+- [x] **TDD Cycle 11**: Test creating a new `.ltlsp-ignore` in the workspace root if none exists.
+- [x] **TDD Cycle 12**: Test filtering a list of `GrammarError` to remove matches for ignored words.
 
 ## Phase 4: `server` Module (LSP State & Routing)
 Focus: Establishing the LSP loop, managing state, and the Diagnostic Pipeline.
 Public Interface: `pub async fn run(connection: Connection, init_options: InitializationOptions)`
 
-- [ ] **TDD Cycle 13**: Test server initialization, extracting LanguageTool `endpoint` from `InitializationOptions`.
-- [ ] **TDD Cycle 14**: Test `Arc<RwLock<ServerState>>` tracking `document_versions` (`i32`) to discard stale diagnostics.
-- [ ] **TDD Cycle 15**: **Debounce & Cancel**: Test that rapid `didChange` events abort in-flight `tokio::spawn` LT check tasks.
-- [ ] **TDD Cycle 16**: **Circuit Breaker**: Test that LT server unavailability sets a cooldown timer in `ServerState`, pausing further requests and sending a `window/showMessage`.
-- [ ] **TDD Cycle 17**: Test mapping the single absolute offset returned by LT (+ `AnnotatedText` offset mapping) to LSP `Range`.
-- [ ] **TDD Cycle 18**: Test generating CodeActions for adding words to dictionary (one action per found ignore file in path).
+- [x] **TDD Cycle 13**: Test server initialization, extracting LanguageTool `endpoint` from `InitializationOptions`.
+- [x] **TDD Cycle 14**: Test `Arc<RwLock<ServerState>>` tracking `document_versions` (`i32`) to discard stale diagnostics.
+- [x] **TDD Cycle 15**: **Debounce & Cancel**: Test that rapid `didChange` events abort in-flight `tokio::spawn` LT check tasks.
+- [x] **TDD Cycle 16**: **Circuit Breaker**: Test that LT server unavailability sets a cooldown timer in `ServerState`, pausing further requests and sending a `window/showMessage`.
+- [x] **TDD Cycle 17**: Test mapping the single absolute offset returned by LT (+ `AnnotatedText` offset mapping) to LSP `Range`.
+- [x] **TDD Cycle 18**: Test generating CodeActions for adding words to dictionary (one action per found ignore file in path).
 
 ## Phase 5: Integration & Verification
-- [ ] **TDD Cycle 19**: Module Integration Test using `lsp-server::Connection::memory()` for fast in-process E2E simulation.
-- [ ] **TDD Cycle 20**: OS-level Integration Test using `std::process::Command` + `Stdio::piped()` to verify JSON-RPC over `stdin`/`stdout`.
-- [ ] Linting (`clippy`) and Typechecking (`cargo check`).
+- [x] **TDD Cycle 19**: Module Integration Test using `lsp-server::Connection::memory()` for fast in-process E2E simulation.
+- [x] **TDD Cycle 20**: OS-level Integration Test using `std::process::Command` + `Stdio::piped()` to verify JSON-RPC over `stdin`/`stdout`.
+- [x] Linting (`clippy`) and Typechecking (`cargo check`).
 
 ## Phase 6 (Post-MVP): Dynamic Grammars
 - [ ] Support downloading and C-compiling additional Tree-sitter grammars (e.g., Java, Kotlin) dynamically based on configuration.

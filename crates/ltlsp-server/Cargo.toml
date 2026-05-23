@@ -1,0 +1,22 @@
+[package]
+name = "ltlsp-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ltlsp-types = { path = "../ltlsp-types" }
+ltlsp-client = { path = "../ltlsp-client" }
+ltlsp-parser = { path = "../ltlsp-parser" }
+ltlsp-dictionary = { path = "../ltlsp-dictionary" }
+lsp-server = "0.7.9"
+lsp-types = "0.97.0"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = "0.1"
+crossbeam-channel = "0.5"
+url = { version = "2.5", features = ["serde"] }
+reqwest = { workspace = true, features = ["blocking"] }
+
+[dev-dependencies]
+wiremock = "0.6"

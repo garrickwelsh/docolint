@@ -2,10 +2,12 @@ use serde::Deserialize;
 
 pub use ltlsp_types::{AnnotatedText, GrammarError, TextSegment};
 
+#[derive(Debug, Clone)]
 pub struct ClientConfig {
     pub base_url: String,
 }
 
+#[derive(Debug, Clone)]
 pub struct LanguageToolClient {
     config: ClientConfig,
     client: reqwest::Client,
