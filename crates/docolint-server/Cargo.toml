@@ -1,14 +1,15 @@
 [package]
-name = "ltlsp-server"
+name = "docolint-server"
 version = "0.1.0"
 edition = "2024"
+description = "Core LSP server implementation for docolint"
 license = "MPL-2.0"
 
 [dependencies]
-ltlsp-types = { path = "../ltlsp-types" }
-ltlsp-client = { path = "../ltlsp-client" }
-ltlsp-parser = { path = "../ltlsp-parser" }
-ltlsp-dictionary = { path = "../ltlsp-dictionary" }
+docolint-types = { path = "../docolint-types" }
+docolint-client = { path = "../docolint-client" }
+docolint-parser = { path = "../docolint-parser" }
+docolint-dictionary = { path = "../docolint-dictionary" }
 lsp-server = "0.7.9"
 lsp-types = "0.97.0"
 serde = { workspace = true, features = ["derive"] }

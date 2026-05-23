@@ -2,11 +2,11 @@ use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
-use ltlsp_types::GrammarError;
+use docolint_types::GrammarError;
 
 /// Manages a set of ignored words for filtering grammar errors.
 ///
-/// Loads `.ltlsp-ignore` files hierarchically from the document's directory up to
+/// Loads `.docolint-ignore` files hierarchically from the document's directory up to
 /// the workspace root. Words are stored case-insensitively (lowercased). Supports
 /// adding new words to a target ignore file and filtering errors based on ignored words.
 pub struct Dictionary {
@@ -27,9 +27,9 @@ impl Dictionary {
         }
     }
 
-    /// Loads and merges `.ltlsp-ignore` files from `document_path` up to `workspace_root`.
+    /// Loads and merges `.docolint-ignore` files from `document_path` up to `workspace_root`.
     ///
-    /// Walks the directory tree upward, reading each `.ltlsp-ignore` file found.
+    /// Walks the directory tree upward, reading each `.docolint-ignore` file found.
     /// Lines starting with `#` are treated as comments and skipped. Empty lines are ignored.
     /// Words are lowercased before storage.
     ///
@@ -51,7 +51,7 @@ impl Dictionary {
         };
 
         while let Some(path) = current {
-            let ignore_file = path.join(".ltlsp-ignore");
+            let ignore_file = path.join(".docolint-ignore");
             if let Ok(content) = fs::read_to_string(ignore_file) {
                 for line in content.lines() {
                     let word = line.trim();
@@ -78,7 +78,7 @@ impl Dictionary {
         self.ignored_words.contains(&word.to_lowercase())
     }
 
-    /// Appends a word to a `.ltlsp-ignore` file and adds it to the in-memory set.
+    /// Appends a word to a `.docolint-ignore` file and adds it to the in-memory set.
     ///
     /// Creates the file if it does not exist. The word is lowercased before writing.
     /// No duplicate check is performed on the file; duplicates are harmless since
@@ -86,7 +86,7 @@ impl Dictionary {
     ///
     /// # Arguments
     /// * `word` - The word to ignore. Empty strings are silently ignored.
-    /// * `target_file` - Path to the `.ltlsp-ignore` file to append to.
+    /// * `target_file` - Path to the `.docolint-ignore` file to append to.
     ///
     /// # Errors
     /// Returns `std::io::Error` if the file cannot be opened or written.
@@ -144,10 +144,10 @@ mod tests {
         let sub = root_path.join("sub");
         fs::create_dir(&sub).unwrap();
         
-        let mut root_ignore = File::create(root_path.join(".ltlsp-ignore")).unwrap();
+        let mut root_ignore = File::create(root_path.join(".docolint-ignore")).unwrap();
         writeln!(root_ignore, "rootword").unwrap();
         
-        let mut sub_ignore = File::create(sub.join(".ltlsp-ignore")).unwrap();
+        let mut sub_ignore = File::create(sub.join(".docolint-ignore")).unwrap();
         writeln!(sub_ignore, "subword").unwrap();
         
         let dict = Dictionary::load(root_path, &sub.join("file.rs"));
@@ -170,7 +170,7 @@ mod tests {
     fn test_add_word_creates_file() {
         let root = tempdir().unwrap();
         let root_path = root.path();
-        let ignore_file = root_path.join(".ltlsp-ignore");
+        let ignore_file = root_path.join(".docolint-ignore");
         
         let mut dict = Dictionary::new();
         dict.add_word("newword", &ignore_file).unwrap();

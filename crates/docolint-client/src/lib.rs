@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-pub use ltlsp_types::{AnnotatedText, GrammarError, TextSegment};
+pub use docolint_types::{AnnotatedText, GrammarError, TextSegment};
 
 /// Configuration for creating a [`LanguageToolClient`].
 #[derive(Debug, Clone)]

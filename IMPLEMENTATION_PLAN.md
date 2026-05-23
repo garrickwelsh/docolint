@@ -1,4 +1,4 @@
-# Implementation Plan: ltlsp
+# Implementation Plan: docolint
 
 This project will be developed using a strict **Test-Driven Development (TDD)** approach:
 `Red (Failing Test) -> Green (Minimal Implementation) -> Refactor`.
@@ -49,11 +49,11 @@ Parse flow for text extraction:
 - [x] **TDD Cycle 9**: Test that extracted text snippets track their **absolute byte offset** from the root document to simplify translation later.
 
 ## Phase 3: `dictionary` Module (Local Truth)
-Focus: Managing multiple `.ltlsp-ignore` files.
+Focus: Managing multiple `.docolint-ignore` files.
 Public Interface: `pub struct Dictionary`, `pub fn load(workspace_root: PathBuf, document_path: PathBuf)`, `pub fn is_ignored(&self, word: &str) -> bool`, `pub fn add_word(&self, word: &str, target_file: PathBuf)`
 
-- [x] **TDD Cycle 10**: Test discovering and merging words from multiple `.ltlsp-ignore` files (workspace root + local module).
-- [x] **TDD Cycle 11**: Test creating a new `.ltlsp-ignore` in the workspace root if none exists.
+- [x] **TDD Cycle 10**: Test discovering and merging words from multiple `.docolint-ignore` files (workspace root + local module).
+- [x] **TDD Cycle 11**: Test creating a new `.docolint-ignore` in the workspace root if none exists.
 - [x] **TDD Cycle 12**: Test filtering a list of `GrammarError` to remove matches for ignored words.
 
 ## Phase 4: `server` Module (LSP State & Routing)

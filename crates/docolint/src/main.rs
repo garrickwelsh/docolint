@@ -1,5 +1,5 @@
 use lsp_server::Connection;
-use ltlsp_server::{run, server_capabilities};
+use docolint_server::{run, server_capabilities};
 use std::error::Error;
 
 /// Their are four mistakes in this sentence, because it's meaning is not clear to the reader, and we doesn't know who's book it is.

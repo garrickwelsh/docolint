@@ -1,4 +1,4 @@
-use ltlsp_server::run;
+use docolint_server::run;
 use lsp_server::{Connection, Message, Notification, Request};
 use lsp_types::{
     DidOpenTextDocumentParams, InitializeParams, PublishDiagnosticsParams,
@@ -73,7 +73,7 @@ async fn test_did_open_diagnostic_flow() {
                     assert_eq!(params.diagnostics.len(), 1);
                     let diag = &params.diagnostics[0];
                     assert_eq!(diag.severity, Some(DiagnosticSeverity::INFORMATION));
-                    assert_eq!(diag.source.as_deref(), Some("ltlsp"));
+                    assert_eq!(diag.source.as_deref(), Some("docolint"));
                     assert!(diag.message.contains("spelling"), "message: {}", diag.message);
                     if let Some(lsp_types::NumberOrString::String(rule_id)) = &diag.code {
                         assert_eq!(rule_id, "MORFOLOGIK_RULE_EN_US");

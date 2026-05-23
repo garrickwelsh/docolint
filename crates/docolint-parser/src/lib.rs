@@ -1,4 +1,4 @@
-use ltlsp_types::{AnnotatedText, TextSegment};
+use docolint_types::{AnnotatedText, TextSegment};
 
 fn language_from_id(id: &str) -> Option<tree_sitter::Language> {
     match id {

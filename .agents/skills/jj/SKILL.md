@@ -1,6 +1,6 @@
 ---
 name: jj
-description: Manage jj (Jujutsu) version control with conventional commits and structured descriptions. Use when user mentions: commit, jj, description, message, branch, bookmark, change, changeid, commitid, push, pull, fetch, rebase.
+description: Manage jj (Jujutsu) version control with conventional commits and structured descriptions. Use when user mentions: commit, jj, description, descriptions, message, messages, branch, bookmark, change, changes, changeid, commitid, push, pull, fetch, rebase, or when writing/updating descriptions on jj changes.
 ---
 
 # jj (Jujutsu) Version Control
@@ -38,6 +38,16 @@ If either fails, stop and tell user.
 2. Write conventional commit message
 3. Run `jj describe --stdin -r X`
 4. Do **not** run `jj new`
+
+### 2b. Write descriptions for multiple changes (user: "write descriptions", "write changes", "describe all changes")
+
+1. Run `jj log -r 'draft()' --no-graph` to list un-described changes
+2. For each change without a meaningful description:
+   - `jj diff --git -r X`
+   - Read relevant source files
+   - Write conventional commit message
+   - Run `jj describe --stdin -r X`
+3. Do **not** run `jj new`
 
 ### 3. Read-only describe (user: "describe this change", "what does X do", "explain this diff")
 

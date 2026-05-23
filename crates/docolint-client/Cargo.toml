@@ -1,11 +1,12 @@
 [package]
-name = "ltlsp-client"
+name = "docolint-client"
 version = "0.1.0"
 edition = "2024"
+description = "HTTP client for the LanguageTool API"
 license = "MPL-2.0"
 
 [dependencies]
-ltlsp-types = { path = "../ltlsp-types" }
+docolint-types = { path = "../docolint-types" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }

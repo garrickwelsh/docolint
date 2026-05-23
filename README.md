@@ -1,23 +1,23 @@
-# ltlsp
+# docolint
 
 Grammar and spelling checking for code comments and prose — powered by [LanguageTool](https://languagetool.org/) and the Language Server Protocol.
 
-`ltlsp` uses `tree-sitter` to extract prose from doc comments, markdown, and other text within source files, then checks it with LanguageTool. Works in Rust, C#, HTML, Markdown, JavaScript/TypeScript, Python, and more.
+`docolint` uses `tree-sitter` to extract prose from doc comments, markdown, and other text within source files, then checks it with LanguageTool. Works in Rust, C#, HTML, Markdown, JavaScript/TypeScript, Python, and more.
 
 ## Features
 
 - **AST-based extraction** — Uses `tree-sitter` to identify doc comments and prose, avoiding false positives on variable names and code
 - **Inline diagnostics** — Grammar and spelling errors appear directly in your editor
 - **Quick fixes** — Apply suggested replacements or ignore words with a single action
-- **Hierarchical ignore files** — `.ltlsp-ignore` files work like `.gitignore`, scoped from file to workspace root
+- **Hierarchical ignore files** — `.docolint-ignore` files work like `.gitignore`, scoped from file to workspace root
 - **Zero-config** — Auto-starts a LanguageTool Docker container if no server is reachable
 - **Multi-language** — Supports Rust, C#, HTML, Markdown, JavaScript, TypeScript, Python, and JSON
 
 ## Requirements
 
-A running LanguageTool HTTP server. By default, `ltlsp` expects one at `http://localhost:8081`.
+A running LanguageTool HTTP server. By default, `docolint` expects one at `http://localhost:8081`.
 
-If no server is reachable and Docker is available, `ltlsp` will automatically start a container (`ghcr.io/garrickwelsh/languagetool`).
+If no server is reachable and Docker is available, `docolint` will automatically start a container (`ghcr.io/garrickwelsh/languagetool`).
 
 To run LanguageTool manually:
 
@@ -31,7 +31,7 @@ docker run -d --network host ghcr.io/garrickwelsh/languagetool
 cargo install --path .
 ```
 
-The `ltlsp` binary will be placed in `~/.cargo/bin`. Ensure this directory is on your `$PATH`.
+The `docolint` binary will be placed in `~/.cargo/bin`. Ensure this directory is on your `$PATH`.
 
 ## Editor Configuration
 
@@ -40,47 +40,47 @@ The `ltlsp` binary will be placed in `~/.cargo/bin`. Ensure this directory is on
 Add to `~/.config/helix/languages.toml`:
 
 ```toml
-[language-server.ltlsp]
-command = "ltlsp"
+[language-server.docolint]
+command = "docolint"
 
 [[language]]
 name = "rust"
-language-servers = ["ltlsp", "rust-analyzer"]
+language-servers = ["docolint", "rust-analyzer"]
 
 [[language]]
 name = "c-sharp"
-language-servers = ["ltlsp"]
+language-servers = ["docolint"]
 
 [[language]]
 name = "html"
-language-servers = ["ltlsp"]
+language-servers = ["docolint"]
 
 [[language]]
 name = "markdown"
-language-servers = ["ltlsp"]
+language-servers = ["docolint"]
 
 [[language]]
 name = "javascript"
-language-servers = ["ltlsp"]
+language-servers = ["docolint"]
 
 [[language]]
 name = "typescript"
-language-servers = ["ltlsp"]
+language-servers = ["docolint"]
 
 [[language]]
 name = "python"
-language-servers = ["ltlsp"]
+language-servers = ["docolint"]
 
 [[language]]
 name = "json"
-language-servers = ["ltlsp"]
+language-servers = ["docolint"]
 ```
 
 To configure a custom LanguageTool endpoint:
 
 ```toml
-[language-server.ltlsp]
-command = "ltlsp"
+[language-server.docolint]
+command = "docolint"
 config = { endpoint = "http://your-lt-server:8081" }
 ```
 
@@ -89,8 +89,8 @@ config = { endpoint = "http://your-lt-server:8081" }
 Requires Neovim 0.11+. Add to your `init.lua`:
 
 ```lua
-vim.lsp.config('ltlsp', {
-  cmd = { 'ltlsp' },
+vim.lsp.config('docolint', {
+  cmd = { 'docolint' },
   settings = {
     initializationOptions = {
       endpoint = "http://localhost:8081",  -- optional, defaults to localhost:8081
@@ -99,7 +99,7 @@ vim.lsp.config('ltlsp', {
   },
 })
 
-vim.lsp.enable('ltlsp')
+vim.lsp.enable('docolint')
 ```
 
 ### VS Code
@@ -108,18 +108,18 @@ A dedicated VS Code extension is planned.
 
 ## Ignoring Words
 
-Create a `.ltlsp-ignore` file in your project root or any subdirectory. Each line contains one word to ignore:
+Create a `.docolint-ignore` file in your project root or any subdirectory. Each line contains one word to ignore:
 
 ```
 # Project-specific terms
-ltlsp
+docolint
 tree-sitter
 languagetool
 ```
 
 Words are matched case-insensitively. Ignore files are merged hierarchically from the current file up to the workspace root.
 
-When hovering over a grammar error, quick-fix actions let you add the offending word to a `.ltlsp-ignore` file at any directory level.
+When hovering over a grammar error, quick-fix actions let you add the offending word to a `.docolint-ignore` file at any directory level.
 
 ## Architecture
 

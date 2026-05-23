@@ -1,7 +1,7 @@
 build:
     cargo build
 run:
-    cargo run -p ltlsp
+    cargo run -p docolint
 
 test:
     cargo test
@@ -9,8 +9,8 @@ test:
 test-all:
     #!/bin/bash
     set -euo pipefail
-    if ! docker ps --format '{{{{.Names}}}}' | grep -q '^ltlsp-lt-server$'; then
-        docker start ltlsp-lt-server 2>/dev/null || just lt-server
+    if ! docker ps --format '{{{{.Names}}}}' | grep -q '^docolint-lt-server$'; then
+        docker start docolint-lt-server 2>/dev/null || just lt-server
         echo "Waiting for LanguageTool to become ready..."
         for i in $(seq 1 30); do
             if nc -z localhost 8081 2>/dev/null; then break; fi
@@ -31,5 +31,5 @@ lt-pull:
     docker pull ghcr.io/garrickwelsh/languagetool
 
 lt-server:
-    docker run -d --network host --name ltlsp-lt-server ghcr.io/garrickwelsh/languagetool
+    docker run -d --network host --name docolint-lt-server ghcr.io/garrickwelsh/languagetool
 

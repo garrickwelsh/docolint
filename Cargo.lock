@@ -193,6 +193,93 @@ dependencies = [
 ]
 
 [[package]]
+name = "docolint"
+version = "0.1.0"
+dependencies = [
+ "docolint-server",
+ "lsp-server",
+ "lsp-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tree-sitter",
+ "tree-sitter-c-sharp",
+ "tree-sitter-html",
+ "tree-sitter-javascript",
+ "tree-sitter-json",
+ "tree-sitter-md",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+ "wiremock",
+]
+
+[[package]]
+name = "docolint-client"
+version = "0.1.0"
+dependencies = [
+ "docolint-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "wiremock",
+]
+
+[[package]]
+name = "docolint-dictionary"
+version = "0.1.0"
+dependencies = [
+ "docolint-types",
+ "serde",
+ "tempfile",
+]
+
+[[package]]
+name = "docolint-parser"
+version = "0.1.0"
+dependencies = [
+ "docolint-types",
+ "tree-sitter",
+ "tree-sitter-c-sharp",
+ "tree-sitter-html",
+ "tree-sitter-javascript",
+ "tree-sitter-json",
+ "tree-sitter-md",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+]
+
+[[package]]
+name = "docolint-server"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "docolint-client",
+ "docolint-dictionary",
+ "docolint-parser",
+ "docolint-types",
+ "lsp-server",
+ "lsp-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+ "wiremock",
+]
+
+[[package]]
+name = "docolint-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -774,93 +861,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_repr",
-]
-
-[[package]]
-name = "ltlsp"
-version = "0.1.0"
-dependencies = [
- "lsp-server",
- "lsp-types",
- "ltlsp-server",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tree-sitter",
- "tree-sitter-c-sharp",
- "tree-sitter-html",
- "tree-sitter-javascript",
- "tree-sitter-json",
- "tree-sitter-md",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-typescript",
- "wiremock",
-]
-
-[[package]]
-name = "ltlsp-client"
-version = "0.1.0"
-dependencies = [
- "ltlsp-types",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "wiremock",
-]
-
-[[package]]
-name = "ltlsp-dictionary"
-version = "0.1.0"
-dependencies = [
- "ltlsp-types",
- "serde",
- "tempfile",
-]
-
-[[package]]
-name = "ltlsp-parser"
-version = "0.1.0"
-dependencies = [
- "ltlsp-types",
- "tree-sitter",
- "tree-sitter-c-sharp",
- "tree-sitter-html",
- "tree-sitter-javascript",
- "tree-sitter-json",
- "tree-sitter-md",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-typescript",
-]
-
-[[package]]
-name = "ltlsp-server"
-version = "0.1.0"
-dependencies = [
- "crossbeam-channel",
- "lsp-server",
- "lsp-types",
- "ltlsp-client",
- "ltlsp-dictionary",
- "ltlsp-parser",
- "ltlsp-types",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "url",
- "wiremock",
-]
-
-[[package]]
-name = "ltlsp-types"
-version = "0.1.0"
-dependencies = [
- "serde",
 ]
 
 [[package]]

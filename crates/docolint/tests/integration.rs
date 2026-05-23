@@ -35,7 +35,7 @@ fn read_message(reader: &mut BufReader<impl Read>) -> Option<String> {
 #[test]
 fn test_binary_handshake() {
     let mut child = Command::new("cargo")
-        .args(["run", "-p", "ltlsp"])
+        .args(["run", "-p", "docolint"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -71,7 +71,7 @@ fn test_binary_handshake() {
 #[test]
 fn test_full_lsp_flow_with_lt() {
     let mut child = Command::new("cargo")
-        .args(["run", "-p", "ltlsp"])
+        .args(["run", "-p", "docolint"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -106,7 +106,7 @@ fn test_full_lsp_flow_with_lt() {
 
                 let diag = &diagnostics[0];
                 assert!(diag["message"].as_str().is_some_and(|s| !s.is_empty()), "diagnostic message is empty");
-                assert_eq!(diag["source"].as_str(), Some("ltlsp"), "source is not 'ltlsp'");
+                assert_eq!(diag["source"].as_str(), Some("docolint"), "source is not 'docolint'");
                 assert!(diag["code"].is_string() || diag["code"].is_number(), "code is missing");
 
                 let range = &diag["range"];

@@ -1,7 +1,8 @@
 [package]
-name = "ltlsp-types"
+name = "docolint-types"
 version = "0.1.0"
 edition = "2024"
+description = "Shared types for the docolint workspace"
 license = "MPL-2.0"
 
 [dependencies]

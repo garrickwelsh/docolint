@@ -6,10 +6,10 @@ use lsp_types::{
     PublishDiagnosticsParams, Range, ServerCapabilities, TextDocumentEdit, TextEdit,
     WorkspaceEdit,
 };
-use ltlsp_client::{ClientConfig, LanguageToolClient};
-use ltlsp_dictionary::Dictionary;
-use ltlsp_parser::parse_document;
-use ltlsp_types::GrammarError;
+use docolint_client::{ClientConfig, LanguageToolClient};
+use docolint_dictionary::Dictionary;
+use docolint_parser::parse_document;
+use docolint_types::GrammarError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
@@ -24,7 +24,7 @@ use url::Url;
 /// Advertises support for:
 /// - Full text document sync (open/close + full content on change)
 /// - Code action provider (for quick fixes and ignore-word actions)
-/// - Execute command provider (`ltlsp.ignoreWord`)
+/// - Execute command provider (`docolint.ignoreWord`)
 pub fn server_capabilities() -> serde_json::Value {
     serde_json::to_value(ServerCapabilities {
         text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Options(
@@ -36,7 +36,7 @@ pub fn server_capabilities() -> serde_json::Value {
         )),
         code_action_provider: Some(lsp_types::CodeActionProviderCapability::Simple(true)),
         execute_command_provider: Some(lsp_types::ExecuteCommandOptions {
-            commands: vec!["ltlsp.ignoreWord".to_string()],
+            commands: vec!["docolint.ignoreWord".to_string()],
             ..Default::default()
         }),
         ..Default::default()
@@ -44,10 +44,10 @@ pub fn server_capabilities() -> serde_json::Value {
     .unwrap()
 }
 
-/// Generates "ignore word" code actions for each `.ltlsp-ignore` file between
+/// Generates "ignore word" code actions for each `.docolint-ignore` file between
 /// the document and the workspace root.
 ///
-/// Each action, when executed by the editor, sends a `ltlsp.ignoreWord` command
+/// Each action, when executed by the editor, sends a `docolint.ignoreWord` command
 /// with the word and target file path.
 ///
 /// # Arguments
@@ -70,7 +70,7 @@ pub fn generate_ignore_actions(
     let mut current = document_path.parent();
 
     while let Some(path) = current {
-        let ignore_file = path.join(".ltlsp-ignore");
+        let ignore_file = path.join(".docolint-ignore");
         let ignore_file_str = ignore_file.to_string_lossy().to_string();
 
         let title = if path == workspace_root {
@@ -88,7 +88,7 @@ pub fn generate_ignore_actions(
             kind: Some(CodeActionKind::QUICKFIX),
             command: Some(Command {
                 title,
-                command: "ltlsp.ignoreWord".to_string(),
+                command: "docolint.ignoreWord".to_string(),
                 arguments: Some(vec![
                     serde_json::Value::String(word.to_string()),
                     serde_json::Value::String(ignore_file_str),
@@ -172,7 +172,7 @@ pub fn generate_replacement_actions(
     actions
 }
 
-use ltlsp_types::AnnotatedText;
+use docolint_types::AnnotatedText;
 
 /// Maps a LanguageTool offset (relative to plain text) to an absolute byte offset
 /// in the original source file.
@@ -346,7 +346,7 @@ pub struct InitializationOptions {
 }
 
 const LT_DOCKER_IMAGE: &str = "ghcr.io/garrickwelsh/languagetool";
-const LT_CONTAINER_NAME: &str = "ltlsp-lt-server";
+const LT_CONTAINER_NAME: &str = "docolint-lt-server";
 
 fn probe_language_tool(endpoint: &str) -> bool {
     let url = match Url::parse(endpoint) {
@@ -447,7 +447,7 @@ fn publish_diagnostics(
                 range: Range { start, end },
                 severity: Some(lsp_types::DiagnosticSeverity::INFORMATION),
                 code: Some(lsp_types::NumberOrString::String(err.rule_id.clone())),
-                source: Some("ltlsp".to_string()),
+                source: Some("docolint".to_string()),
                 message: err.message,
                 data: Some(serde_json::json!({
                     "rule_id": err.rule_id,
@@ -556,7 +556,7 @@ fn spawn_check(
 /// - `textDocument/didOpen`, `didChange`: spawns debounced async grammar checks
 /// - `textDocument/didClose`: cancels pending tasks and clears document state
 /// - `textDocument/codeAction`: generates replacement and ignore-word quick fixes
-/// - `workspace/executeCommand`: handles `ltlsp.ignoreWord` to add words to `.ltlsp-ignore`
+/// - `workspace/executeCommand`: handles `docolint.ignoreWord` to add words to `.docolint-ignore`
 ///
 /// # Arguments
 /// * `connection` - The LSP stdio connection from the editor.
@@ -617,7 +617,7 @@ pub async fn run(
                         if let Ok(cmd_params) =
                             serde_json::from_value::<lsp_types::ExecuteCommandParams>(req.params.clone())
                         {
-                            if cmd_params.command == "ltlsp.ignoreWord" {
+                            if cmd_params.command == "docolint.ignoreWord" {
                                 let args = &cmd_params.arguments;
                                 if args.len() >= 3 {
                                     let word = args[0].as_str().unwrap_or("").to_string();
@@ -827,7 +827,7 @@ mod tests {
 
     #[test]
     fn test_offset_mapping() {
-        use ltlsp_types::TextSegment;
+        use docolint_types::TextSegment;
         let text = AnnotatedText {
             segments: vec![
                 TextSegment {
@@ -898,15 +898,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_full_diagnostic_pipeline() {
-        use ltlsp_parser::parse_document;
-        use ltlsp_dictionary::Dictionary;
+        use docolint_parser::parse_document;
+        use docolint_dictionary::Dictionary;
 
         let content = "/// This is a testt.";
 
         let annotated = parse_document("rust", content);
         assert_eq!(annotated.plain_text().trim(), "This is a testt.");
 
-        let errors = vec![ltlsp_types::GrammarError {
+        let errors = vec![docolint_types::GrammarError {
             message: "Spelling error".to_string(),
             offset: 10,
             length: 5,
@@ -940,11 +940,11 @@ mod tests {
             assert!(a.title.contains("module"));
             assert!(a.command.is_some());
             let cmd = a.command.as_ref().unwrap();
-            assert_eq!(cmd.command, "ltlsp.ignoreWord");
+            assert_eq!(cmd.command, "docolint.ignoreWord");
             let args = cmd.arguments.as_ref().unwrap();
             assert_eq!(args.len(), 3);
             assert_eq!(args[0].as_str().unwrap(), "typo");
-            assert!(args[1].as_str().unwrap().ends_with(".ltlsp-ignore"));
+            assert!(args[1].as_str().unwrap().ends_with(".docolint-ignore"));
             assert_eq!(args[2].as_str().unwrap(), uri);
         }
         if let CodeActionOrCommand::CodeAction(a) = &actions[2] {
@@ -968,7 +968,7 @@ mod tests {
             },
             severity: Some(lsp_types::DiagnosticSeverity::INFORMATION),
             code: Some(lsp_types::NumberOrString::String("SPELLING".to_string())),
-            source: Some("ltlsp".to_string()),
+            source: Some("docolint".to_string()),
             message: "Spelling error".to_string(),
             data: Some(json!({
                 "rule_id": "SPELLING",
