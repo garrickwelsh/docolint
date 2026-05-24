@@ -1,6 +1,6 @@
 [package]
 name = "docolint-server"
-version = "0.1.0"
+version = "0.1.3"
 edition.workspace = true
 description = "Core LSP server implementation for docolint"
 license.workspace = true
@@ -10,10 +10,10 @@ categories = ["development-tools"]
 keywords = ["lsp", "language-server", "grammar-checking"]
 
 [dependencies]
-docolint-types = { path = "../docolint-types", version = "0.1.0" }
-docolint-client = { path = "../docolint-client", version = "0.1.0" }
-docolint-parser = { path = "../docolint-parser", version = "0.1.0" }
-docolint-dictionary = { path = "../docolint-dictionary", version = "0.1.0" }
+docolint-types = { path = "../docolint-types", version = "0.1.3" }
+docolint-client = { path = "../docolint-client", version = "0.1.3" }
+docolint-parser = { path = "../docolint-parser", version = "0.1.3" }
+docolint-dictionary = { path = "../docolint-dictionary", version = "0.1.3" }
 lsp-server = "0.7.9"
 lsp-types = "0.97.0"
 serde = { workspace = true, features = ["derive"] }

@@ -1,6 +1,6 @@
 [package]
 name = "docolint-types"
-version = "0.1.0"
+version = "0.1.3"
 edition.workspace = true
 description = "Shared types for the docolint workspace"
 license.workspace = true

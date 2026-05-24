@@ -1,6 +1,6 @@
 [package]
 name = "docolint"
-version = "0.1.0"
+version = "0.1.3"
 edition.workspace = true
 description = "LSP server for documentation and comment grammar/spell checking powered by LanguageTool"
 license.workspace = true
@@ -11,7 +11,7 @@ categories = ["development-tools", "command-line-utilities"]
 keywords = ["lsp", "grammar", "spell-check", "languagetool"]
 
 [dependencies]
-docolint-server = { path = "../docolint-server", version = "0.1.0" }
+docolint-server = { path = "../docolint-server", version = "0.1.3" }
 lsp-server = "0.7.9"
 lsp-types = "0.97.0"
 serde_json = { workspace = true }
