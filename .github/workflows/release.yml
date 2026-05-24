@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-linux:
+    name: Linux (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Build
+        run: cross build --release --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../docolint-${{ matrix.target }}.tar.gz docolint
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docolint-${{ matrix.target }}
+          path: docolint-${{ matrix.target }}.tar.gz
+
+  build-macos:
+    name: macOS (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            runner: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../docolint-${{ matrix.target }}.tar.gz docolint
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docolint-${{ matrix.target }}
+          path: docolint-${{ matrix.target }}.tar.gz
+
+  build-windows:
+    name: Windows (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Build
+        run: cross build --release --target x86_64-pc-windows-gnu
+      - name: Package
+        run: |
+          cd target/x86_64-pc-windows-gnu/release
+          zip ../../../docolint-x86_64-windows.zip docolint.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docolint-x86_64-windows
+          path: docolint-x86_64-windows.zip
+
+  release:
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+      - name: Publish crates to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo publish -p docolint-types
+          cargo publish -p docolint-client
+          cargo publish -p docolint-parser
+          cargo publish -p docolint-dictionary
+          cargo publish -p docolint-server
+          cargo publish -p docolint

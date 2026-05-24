@@ -1,12 +1,17 @@
 [package]
 name = "docolint"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 description = "LSP server for documentation and comment grammar/spell checking powered by LanguageTool"
-license = "MPL-2.0"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+categories = ["development-tools", "command-line-utilities"]
+keywords = ["lsp", "grammar", "spell-check", "languagetool"]
 
 [dependencies]
-docolint-server = { path = "../docolint-server" }
+docolint-server = { path = "../docolint-server", version = "0.1.0" }
 lsp-server = "0.7.9"
 lsp-types = "0.97.0"
 reqwest = { workspace = true }

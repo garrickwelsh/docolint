@@ -1,6 +1,12 @@
 [workspace]
 members = ["crates/*"]
 resolver = "2"
+
+[workspace.package]
+repository = "https://github.com/garrickwelsh/docolint"
+homepage = "https://github.com/garrickwelsh/docolint"
+readme = "README.md"
+edition = "2024"
 license = "MPL-2.0"
 
 [workspace.dependencies]

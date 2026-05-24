@@ -1,12 +1,16 @@
 [package]
 name = "docolint-dictionary"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 description = "Hierarchical ignore-word dictionary for docolint"
-license = "MPL-2.0"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories = ["development-tools"]
+keywords = ["lsp", "dictionary", "ignore-file"]
 
 [dependencies]
-docolint-types = { path = "../docolint-types" }
+docolint-types = { path = "../docolint-types", version = "0.1.0" }
 serde = { workspace = true }
 
 [dev-dependencies]

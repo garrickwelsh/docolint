@@ -1,12 +1,16 @@
 [package]
 name = "docolint-parser"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 description = "Tree-sitter based prose extraction from source code"
-license = "MPL-2.0"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories = ["development-tools"]
+keywords = ["lsp", "tree-sitter", "prose-extraction"]
 
 [dependencies]
-docolint-types = { path = "../docolint-types" }
+docolint-types = { path = "../docolint-types", version = "0.1.0" }
 tree-sitter = { workspace = true }
 tree-sitter-rust = "0.24.2"
 tree-sitter-html = "0.23.2"

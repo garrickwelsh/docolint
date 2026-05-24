@@ -1,15 +1,19 @@
 [package]
 name = "docolint-server"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 description = "Core LSP server implementation for docolint"
-license = "MPL-2.0"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories = ["development-tools"]
+keywords = ["lsp", "language-server", "grammar-checking"]
 
 [dependencies]
-docolint-types = { path = "../docolint-types" }
-docolint-client = { path = "../docolint-client" }
-docolint-parser = { path = "../docolint-parser" }
-docolint-dictionary = { path = "../docolint-dictionary" }
+docolint-types = { path = "../docolint-types", version = "0.1.0" }
+docolint-client = { path = "../docolint-client", version = "0.1.0" }
+docolint-parser = { path = "../docolint-parser", version = "0.1.0" }
+docolint-dictionary = { path = "../docolint-dictionary", version = "0.1.0" }
 lsp-server = "0.7.9"
 lsp-types = "0.97.0"
 serde = { workspace = true, features = ["derive"] }

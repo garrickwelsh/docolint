@@ -1,9 +1,13 @@
 [package]
 name = "docolint-types"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 description = "Shared types for the docolint workspace"
-license = "MPL-2.0"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories = ["development-tools"]
+keywords = ["lsp", "types", "grammar-checking"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
