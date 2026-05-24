@@ -74,3 +74,43 @@ Public Interface: `pub async fn run(connection: Connection, init_options: Initia
 
 ## Phase 6 (Post-MVP): Dynamic Grammars
 - [ ] Support downloading and C-compiling additional Tree-sitter grammars (e.g., Java, Kotlin) dynamically based on configuration.
+
+## Phase 7: Extended Language Support
+Focus: Add comment extraction for 6 new languages + fix existing JS/TS/Python. Remove JSON.
+
+### Design Decisions
+See [docs/adr/0001-extended-language-support.md](docs/adr/0001-extended-language-support.md).
+
+### New Public Interface
+```rust
+pub struct ParserConfig {
+    pub include_inline_comments: bool,
+}
+
+pub fn parse_document(language_id: &str, content: &str, config: &ParserConfig) -> AnnotatedText
+```
+
+### Dependencies Added
+| Language | Crate | Version |
+|---|---|---|
+| Java | `tree-sitter-java` | `0.23.5` |
+| Bash | `tree-sitter-bash` | `0.25.1` |
+| PowerShell | `tree-sitter-powershell` | `0.26.4` |
+| SCSS | `tree-sitter-scss` | `1.0.0` |
+| CSS | `tree-sitter-css` | `0.25.0` |
+| Lua | `tree-sitter-lua` | `0.5.0` |
+
+### TDD Cycles
+- [x] **TDD Cycle 21**: `ParserConfig` default + CSS comment extraction (tracer bullet)
+- [x] **TDD Cycle 22**: Lua `--` and `--[[ ]]` comment extraction
+- [x] **TDD Cycle 23**: Bash `#` comment extraction
+- [x] **TDD Cycle 24**: PowerShell `#` and `<# #>` comment extraction
+- [x] **TDD Cycle 25**: SCSS `/* */` comment extraction (note: `//` silent comments not in AST)
+- [x] **TDD Cycle 26**: Python `#` comment extraction
+- [x] **TDD Cycle 27**: Java `/** */` doc extraction, `//` excluded by default
+- [x] **TDD Cycle 28**: Java inline comments when `include_inline_comments: true`
+- [x] **TDD Cycle 29**: JavaScript `/** */` doc extraction, `//` excluded by default
+- [x] **TDD Cycle 30**: JSON removed from language mappings
+- [x] **TDD Cycle 31**: Markdown recursive parsing with Java fenced blocks
+- [x] **TDD Cycle 32**: `include_inline_comments` flows from `InitializationOptions` → `ServerState` → `ParserConfig`
+- [x] Linting (`clippy`) and Typechecking (`cargo check`) — zero warnings

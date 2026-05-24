@@ -11,7 +11,7 @@ Grammar and spelling checking for code comments and prose — powered by [Langua
 - **Quick fixes** — Apply suggested replacements or ignore words with a single action
 - **Hierarchical ignore files** — `.docolint-ignore` files work like `.gitignore`, scoped from file to workspace root
 - **Zero-config** — Auto-starts a LanguageTool Docker container if no server is reachable
-- **Multi-language** — Supports Rust, C#, HTML, Markdown, JavaScript, TypeScript, Python, and JSON
+- **Multi-language** — Supports Rust, C#, HTML, Markdown, JavaScript, TypeScript, Python, Java, Bash, PowerShell, SCSS, CSS, and Lua
 
 ## Requirements
 
@@ -74,6 +74,30 @@ language-servers = ["docolint"]
 [[language]]
 name = "json"
 language-servers = ["docolint"]
+
+[[language]]
+name = "java"
+language-servers = ["docolint"]
+
+[[language]]
+name = "bash"
+language-servers = ["docolint"]
+
+[[language]]
+name = "powershell"
+language-servers = ["docolint"]
+
+[[language]]
+name = "scss"
+language-servers = ["docolint"]
+
+[[language]]
+name = "css"
+language-servers = ["docolint"]
+
+[[language]]
+name = "lua"
+language-servers = ["docolint"]
 ```
 
 To configure a custom LanguageTool endpoint:
@@ -104,7 +128,27 @@ vim.lsp.enable('docolint')
 
 ### VS Code
 
-A dedicated VS Code extension is planned.
+VS Code support may be added in the future.
+
+## Supported Languages
+
+| Language | Doc Comments | Inline Comments | Notes |
+|---|---|---|---|
+| Rust | ✅ `///`, `/** */` | ❌ | |
+| C# | ✅ `///`, `/** */` | ❌ | |
+| JavaScript | ✅ `/** */` | ⚙️ `//` | Configurable |
+| TypeScript | ✅ `/** */` | ⚙️ `//` | Configurable |
+| Python | ✅ `#` | | All comments |
+| Java | ✅ `/** */` | ⚙️ `//`, `/* */` | Configurable |
+| Bash | ✅ `#` | | All comments |
+| PowerShell | ✅ `#`, `<# #>` | | All comments |
+| SCSS | ✅ `/* */` | | `//` silent comments not in AST |
+| CSS | ✅ `/* */` | | All comments |
+| Lua | ✅ `--`, `--[[ ]]` | | All comments |
+| HTML | ✅ text nodes | | |
+| Markdown | ✅ prose + recursion | | |
+
+⚙️ Inline comments are controlled by the `includeInlineComments` initialization option (default: `false`).
 
 ## Ignoring Words
 

@@ -8,7 +8,7 @@ use lsp_types::{
 };
 use docolint_client::{ClientConfig, LanguageToolClient};
 use docolint_dictionary::Dictionary;
-use docolint_parser::parse_document;
+use docolint_parser::{parse_document, ParserConfig};
 use docolint_types::GrammarError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -262,6 +262,7 @@ pub struct ServerState {
     pub started_lt: bool,
     /// Whether to stop the LanguageTool Docker container on server shutdown.
     pub stop_on_exit: bool,
+    pub include_inline_comments: bool,
 }
 
 impl ServerState {
@@ -284,6 +285,7 @@ impl ServerState {
             workspace_root: None,
             started_lt: false,
             stop_on_exit: false,
+            include_inline_comments: false,
         }
     }
 
@@ -343,6 +345,7 @@ pub struct InitializationOptions {
     /// When `true`, stops the auto-started LanguageTool Docker container on shutdown.
     /// Defaults to `false` if not provided.
     pub stop_on_exit: Option<bool>,
+    pub include_inline_comments: Option<bool>,
 }
 
 const LT_DOCKER_IMAGE: &str = "ghcr.io/garrickwelsh/languagetool";
@@ -482,7 +485,8 @@ fn recheck_document(
         };
         let lang = s.document_languages.get(&uri).cloned().unwrap_or_else(|| "plain".to_string());
         let version = s.document_versions.get(&uri).copied().unwrap_or(1);
-        let annotated = parse_document(&lang, &content);
+        let config = ParserConfig { include_inline_comments: s.include_inline_comments };
+        let annotated = parse_document(&lang, &content, &config);
         (content, annotated, version)
     };
 
@@ -520,7 +524,11 @@ fn spawn_check(
             return;
         }
 
-        let annotated = parse_document(&lang, &content);
+        let config = {
+            let s = state_task.read().unwrap();
+            ParserConfig { include_inline_comments: s.include_inline_comments }
+        };
+        let annotated = parse_document(&lang, &content, &config);
         let result = client.check(annotated.clone()).await;
 
         match result {
@@ -576,10 +584,12 @@ pub async fn run(
         .unwrap_or(InitializationOptions {
             endpoint: None,
             stop_on_exit: None,
+            include_inline_comments: None,
         });
 
     let endpoint = options.endpoint.unwrap_or_else(|| "http://localhost:8081".to_string());
     let stop_on_exit = options.stop_on_exit.unwrap_or(false);
+    let include_inline_comments = options.include_inline_comments.unwrap_or(false);
 
     let client = LanguageToolClient::new(ClientConfig {
         base_url: endpoint.clone(),
@@ -592,6 +602,7 @@ pub async fn run(
         url.to_file_path().ok()
     });
     state_raw.stop_on_exit = stop_on_exit;
+    state_raw.include_inline_comments = include_inline_comments;
     let state = Arc::new(RwLock::new(state_raw));
 
     if !probe_language_tool(&endpoint) {
@@ -898,12 +909,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_full_diagnostic_pipeline() {
-        use docolint_parser::parse_document;
         use docolint_dictionary::Dictionary;
 
         let content = "/// This is a testt.";
 
-        let annotated = parse_document("rust", content);
+        let annotated = parse_document("rust", content, &ParserConfig::default());
         assert_eq!(annotated.plain_text().trim(), "This is a testt.");
 
         let errors = vec![docolint_types::GrammarError {

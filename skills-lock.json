@@ -42,6 +42,12 @@
       "sourceType": "github",
       "skillPath": "skills/productivity/write-a-skill/SKILL.md",
       "computedHash": "b44d8aab2ead83c716e01af4c9a24ccc4575ce70ad58ec4f1749fb88c9cc82ba"
+    },
+    "jj": {
+      "source": "local",
+      "sourceType": "local",
+      "skillPath": ".agents/skills/jj/SKILL.md",
+      "computedHash": "b3a84798ffc01b2abea97b998eb5e3f7561256eeecf8b61e0e2e6c12f1338e03"
     }
   }
 }
