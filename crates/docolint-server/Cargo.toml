@@ -19,10 +19,8 @@ lsp-types = "0.97.0"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-tracing = "0.1"
 crossbeam-channel = "0.5"
 url = { version = "2.5", features = ["serde"] }
-reqwest = { workspace = true, features = ["blocking"] }
 
 [dev-dependencies]
 wiremock = "0.6"
