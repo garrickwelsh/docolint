@@ -637,6 +637,16 @@ mod tests {
         assert!(!text.contains("Check me not"));
     }
 
+    #[test]
+    fn test_markdown_empty_fence_ignored() {
+        let src = "Hello world\n\n```\nCheck me not\n```\n\nMore prose here";
+        let result = parse_document("markdown", src);
+        let text = result.plain_text();
+        assert!(text.contains("Hello world"));
+        assert!(text.contains("More prose here"));
+        assert!(!text.contains("Check me not"));
+    }
+
     // ── Cycle 9: Absolute byte offset tracking ──────────────────────────────
 
     #[test]
