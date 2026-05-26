@@ -557,6 +557,249 @@ fn spawn_check(
     state.write().unwrap().register_task(uri, handle);
 }
 
+/// Handles `docolint.ignoreWord` command payloads.
+///
+/// Writes selected word into target ignore file, then triggers recheck for
+/// originating document when URI is present.
+fn handle_ignore_word_command(
+    state: Arc<RwLock<ServerState>>,
+    sender: crossbeam_channel::Sender<Message>,
+    cmd_params: lsp_types::ExecuteCommandParams,
+) {
+    if cmd_params.command != "docolint.ignoreWord" {
+        return;
+    }
+
+    let args = &cmd_params.arguments;
+    if args.len() < 3 {
+        return;
+    }
+
+    let word = args[0].as_str().unwrap_or("").to_string();
+    let ignore_path = args[1].as_str().unwrap_or("").to_string();
+    let uri = args[2].as_str().unwrap_or("").to_string();
+
+    if ignore_path.is_empty() || word.is_empty() {
+        return;
+    }
+
+    let mut dict = Dictionary::new();
+    let _ = dict.add_word(&word, Path::new(&ignore_path));
+
+    if !uri.is_empty() {
+        recheck_document(state, sender, uri);
+    }
+}
+
+/// Handles `workspace/executeCommand` requests.
+///
+/// Returns `true` when request method matches, even if payload decoding fails.
+/// Successful decoding delegates to `handle_ignore_word_command` and sends null response.
+fn handle_execute_command_request(
+    state: Arc<RwLock<ServerState>>,
+    sender: &crossbeam_channel::Sender<Message>,
+    req: &lsp_server::Request,
+) -> bool {
+    if req.method != "workspace/executeCommand" {
+        return false;
+    }
+
+    if let Ok(cmd_params) = serde_json::from_value::<lsp_types::ExecuteCommandParams>(req.params.clone()) {
+        handle_ignore_word_command(state, sender.clone(), cmd_params);
+        let resp = Response::new_ok(req.id.clone(), serde_json::Value::Null);
+        let _ = sender.send(Message::Response(resp));
+    }
+
+    true
+}
+
+/// Builds code actions for diagnostics attached to single document.
+///
+/// Combines ignore-word actions derived from selected text range with
+/// replacement actions derived from diagnostic metadata.
+fn collect_code_actions(
+    state: &Arc<RwLock<ServerState>>,
+    params: CodeActionParams,
+) -> Vec<CodeActionOrCommand> {
+    let uri = params.text_document.uri.clone();
+    let root = state
+        .read()
+        .unwrap()
+        .workspace_root
+        .clone()
+        .unwrap_or_default();
+
+    let mut actions = Vec::new();
+    let uri_val = serde_json::to_value(&uri).unwrap();
+    if let Ok(url) = serde_json::from_value::<Url>(uri_val) {
+        let path = url.to_file_path().unwrap_or_default();
+        let uri_str = uri.to_string();
+
+        for diag in params.context.diagnostics {
+            let content = state
+                .read()
+                .unwrap()
+                .document_content
+                .get(&uri_str)
+                .cloned();
+            if let Some(content) = content {
+                let start_offset = position_to_offset(&content, diag.range.start);
+                let end_offset = position_to_offset(&content, diag.range.end);
+                if start_offset < end_offset && end_offset <= content.len() {
+                    let word = &content[start_offset..end_offset];
+                    actions.extend(generate_ignore_actions(&root, &path, word, &uri_str));
+                }
+                actions.extend(generate_replacement_actions(&diag, &uri, &content));
+            }
+        }
+    }
+
+    actions
+}
+
+/// Handles `textDocument/codeAction` requests.
+///
+/// Returns `true` when request method matches. Matching requests are decoded,
+/// converted into actions, then answered over LSP sender.
+fn handle_code_action_request(
+    state: Arc<RwLock<ServerState>>,
+    sender: &crossbeam_channel::Sender<Message>,
+    req: lsp_server::Request,
+) -> bool {
+    if req.method != "textDocument/codeAction" {
+        return false;
+    }
+
+    if let Ok(params) = serde_json::from_value::<CodeActionParams>(req.params) {
+        let result = serde_json::to_value(collect_code_actions(&state, params)).unwrap();
+        let resp = Response::new_ok(req.id, result);
+        let _ = sender.send(Message::Response(resp));
+    }
+
+    true
+}
+
+/// Handles `textDocument/didOpen` notifications.
+///
+/// Stores current content, version, and language in server state, then starts
+/// debounced grammar check for opened document.
+fn handle_did_open(state: Arc<RwLock<ServerState>>, sender: crossbeam_channel::Sender<Message>, params: DidOpenTextDocumentParams) {
+    let uri = params.text_document.uri.to_string();
+    let version = params.text_document.version;
+    let content = params.text_document.text;
+    let lang = params.text_document.language_id;
+
+    {
+        let mut state_w = state.write().unwrap();
+        state_w.update_version(uri.clone(), version);
+        state_w.document_content.insert(uri.clone(), content.clone());
+        state_w.document_languages.insert(uri.clone(), lang.clone());
+    }
+
+    spawn_check(state, sender, uri, version, content, lang);
+}
+
+/// Handles `textDocument/didChange` notifications.
+///
+/// Applies full-content replacement, updates tracked version, reuses known
+/// language, then starts fresh debounced grammar check.
+fn handle_did_change(
+    state: Arc<RwLock<ServerState>>,
+    sender: crossbeam_channel::Sender<Message>,
+    params: DidChangeTextDocumentParams,
+) {
+    let uri = params.text_document.uri.to_string();
+    let version = params.text_document.version;
+    if let Some(change) = params.content_changes.into_iter().next() {
+        let content = change.text;
+
+        let lang = {
+            let mut state_w = state.write().unwrap();
+            state_w.update_version(uri.clone(), version);
+            state_w.document_content.insert(uri.clone(), content.clone());
+            state_w
+                .document_languages
+                .get(&uri)
+                .cloned()
+                .unwrap_or_else(|| "plain".to_string())
+        };
+
+        spawn_check(state, sender, uri, version, content, lang);
+    }
+}
+
+/// Handles `textDocument/didClose` notifications.
+///
+/// Cancels in-flight work and removes all document-specific state tracked for URI.
+fn handle_did_close(state: Arc<RwLock<ServerState>>, params: DidCloseTextDocumentParams) {
+    let uri = params.text_document.uri.to_string();
+    let mut state_w = state.write().unwrap();
+    state_w.cancel_task(&uri);
+    state_w.document_versions.remove(&uri);
+    state_w.document_content.remove(&uri);
+    state_w.document_languages.remove(&uri);
+    state_w.document_errors.remove(&uri);
+}
+
+/// Routes LSP notifications to document lifecycle handlers.
+///
+/// Unknown notifications are ignored.
+fn handle_notification(
+    state: Arc<RwLock<ServerState>>,
+    sender: &crossbeam_channel::Sender<Message>,
+    not: Notification,
+) {
+    match not.method.as_str() {
+        "textDocument/didOpen" => {
+            if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(not.params) {
+                handle_did_open(state, sender.clone(), params);
+            }
+        }
+        "textDocument/didChange" => {
+            if let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(not.params) {
+                handle_did_change(state, sender.clone(), params);
+            }
+        }
+        "textDocument/didClose" => {
+            if let Ok(params) = serde_json::from_value::<DidCloseTextDocumentParams>(not.params) {
+                handle_did_close(state, params);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Stops auto-started LanguageTool container when shutdown policy requires it.
+fn stop_language_tool_if_needed(state: &Arc<RwLock<ServerState>>) {
+    if state.read().unwrap().stop_on_exit {
+        let _ = std::process::Command::new("docker")
+            .args(["stop", LT_CONTAINER_NAME])
+            .output();
+    }
+}
+
+/// Routes LSP requests handled inside main server loop.
+///
+/// Shutdown requests terminate loop via `Err(())`. All other known request types
+/// are handled in-place and return `Ok(())`.
+fn handle_request(
+    connection: &Connection,
+    state: Arc<RwLock<ServerState>>,
+    req: lsp_server::Request,
+) -> Result<(), ()> {
+    if let Ok(true) = connection.handle_shutdown(&req) {
+        stop_language_tool_if_needed(&state);
+        return Err(());
+    }
+
+    if handle_execute_command_request(state.clone(), &connection.sender, &req) {
+        return Ok(());
+    }
+
+    let _ = handle_code_action_request(state, &connection.sender, req);
+    Ok(())
+}
+
 /// Main server entry point. Runs the LSP event loop on the given connection.
 ///
 /// Initializes server state, probes for LanguageTool availability (auto-starts Docker
@@ -578,6 +821,7 @@ pub async fn run(
     connection: Connection,
     params: InitializeParams,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    // Decode init options once so downstream setup reads concrete values.
     let options: InitializationOptions = params
         .initialization_options
         .and_then(|v| serde_json::from_value(v).ok())
@@ -591,6 +835,7 @@ pub async fn run(
     let stop_on_exit = options.stop_on_exit.unwrap_or(false);
     let include_inline_comments = options.include_inline_comments.unwrap_or(false);
 
+    // Build client and mutable server state shared by request/notification handlers.
     let client = LanguageToolClient::new(ClientConfig {
         base_url: endpoint.clone(),
     });
@@ -605,6 +850,7 @@ pub async fn run(
     state_raw.include_inline_comments = include_inline_comments;
     let state = Arc::new(RwLock::new(state_raw));
 
+    // Ensure LanguageTool is reachable before entering blocking LSP receive loop.
     if !probe_language_tool(&endpoint) {
         start_language_tool(&endpoint, &connection.sender);
         state.write().unwrap().started_lt = true;
@@ -612,181 +858,20 @@ pub async fn run(
 
     let state_for_loop = state.clone();
     tokio::task::spawn_blocking(move || {
+        // Main LSP loop: receive one message at time, dispatch by message type.
         while let Ok(msg) = connection.receiver.recv() {
             match msg {
                 Message::Request(req) => {
-                    if let Ok(true) = connection.handle_shutdown(&req) {
-                        if state_for_loop.read().unwrap().stop_on_exit {
-                            let _ = std::process::Command::new("docker")
-                                .args(["stop", LT_CONTAINER_NAME])
-                                .output();
-                        }
+                    // Request path: shutdown, executeCommand, codeAction.
+                    if handle_request(&connection, state_for_loop.clone(), req).is_err() {
                         return Ok(());
                     }
-
-                    if req.method == "workspace/executeCommand" {
-                        if let Ok(cmd_params) =
-                            serde_json::from_value::<lsp_types::ExecuteCommandParams>(req.params.clone())
-                        {
-                            if cmd_params.command == "docolint.ignoreWord" {
-                                let args = &cmd_params.arguments;
-                                if args.len() >= 3 {
-                                    let word = args[0].as_str().unwrap_or("").to_string();
-                                    let ignore_path = args[1].as_str().unwrap_or("").to_string();
-                                    let uri = args[2].as_str().unwrap_or("").to_string();
-
-                                    if !ignore_path.is_empty() && !word.is_empty() {
-                                        let mut dict = Dictionary::new();
-                                        let _ = dict.add_word(
-                                            &word,
-                                            Path::new(&ignore_path),
-                                        );
-
-                                        if !uri.is_empty() {
-                                            recheck_document(
-                                                state_for_loop.clone(),
-                                                connection.sender.clone(),
-                                                uri,
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                            let resp = Response::new_ok(req.id.clone(), serde_json::Value::Null);
-                            let _ = connection.sender.send(Message::Response(resp));
-                        }
-                    } else if req.method == "textDocument/codeAction"
-                        && let Ok(params) = serde_json::from_value::<CodeActionParams>(req.params)
-                    {
-                        let uri = params.text_document.uri.clone();
-                        let root = state_for_loop
-                            .read()
-                            .unwrap()
-                            .workspace_root
-                            .clone()
-                            .unwrap_or_default();
-
-                        let mut actions = Vec::new();
-
-                        let uri_val = serde_json::to_value(&uri).unwrap();
-                        if let Ok(url) = serde_json::from_value::<Url>(uri_val) {
-                            let path = url.to_file_path().unwrap_or_default();
-                            let uri_str = uri.to_string();
-
-                            for diag in params.context.diagnostics {
-                                let content = state_for_loop
-                                    .read()
-                                    .unwrap()
-                                    .document_content
-                                    .get(&uri_str)
-                                    .cloned();
-                                if let Some(content) = content {
-                                    let start_offset =
-                                        position_to_offset(&content, diag.range.start);
-                                    let end_offset =
-                                        position_to_offset(&content, diag.range.end);
-                                    if start_offset < end_offset && end_offset <= content.len() {
-                                        let word = &content[start_offset..end_offset];
-                                        actions.extend(generate_ignore_actions(
-                                            &root,
-                                            &path,
-                                            word,
-                                            &uri_str,
-                                        ));
-                                    }
-                                    actions.extend(generate_replacement_actions(
-                                        &diag,
-                                        &uri,
-                                        &content,
-                                    ));
-                                }
-                            }
-                        }
-
-                        let result = serde_json::to_value(actions).unwrap();
-                        let resp = Response::new_ok(req.id, result);
-                        let _ = connection.sender.send(Message::Response(resp));
-                    }
                 }
-                Message::Notification(not) => match not.method.as_str() {
-                    "textDocument/didOpen" => {
-                        if let Ok(params) =
-                            serde_json::from_value::<DidOpenTextDocumentParams>(not.params)
-                        {
-                            let uri = params.text_document.uri.to_string();
-                            let version = params.text_document.version;
-                            let content = params.text_document.text;
-                            let lang = params.text_document.language_id;
-
-                            {
-                                let mut state_w = state_for_loop.write().unwrap();
-                                state_w.update_version(uri.clone(), version);
-                                state_w
-                                    .document_content
-                                    .insert(uri.clone(), content.clone());
-                                state_w
-                                    .document_languages
-                                    .insert(uri.clone(), lang.clone());
-                            }
-
-                            spawn_check(
-                                state_for_loop.clone(),
-                                connection.sender.clone(),
-                                uri,
-                                version,
-                                content,
-                                lang,
-                            );
-                        }
-                    }
-                    "textDocument/didChange" => {
-                        if let Ok(params) =
-                            serde_json::from_value::<DidChangeTextDocumentParams>(not.params)
-                        {
-                            let uri = params.text_document.uri.to_string();
-                            let version = params.text_document.version;
-                            if let Some(change) = params.content_changes.into_iter().next() {
-                                let content = change.text;
-
-                                let lang = {
-                                    let mut state_w = state_for_loop.write().unwrap();
-                                    state_w.update_version(uri.clone(), version);
-                                    state_w
-                                        .document_content
-                                        .insert(uri.clone(), content.clone());
-                                    state_w
-                                        .document_languages
-                                        .get(&uri)
-                                        .cloned()
-                                        .unwrap_or_else(|| "plain".to_string())
-                                };
-
-                                spawn_check(
-                                    state_for_loop.clone(),
-                                    connection.sender.clone(),
-                                    uri,
-                                    version,
-                                    content,
-                                    lang,
-                                );
-                            }
-                        }
-                    }
-                    "textDocument/didClose" => {
-                        if let Ok(params) =
-                            serde_json::from_value::<DidCloseTextDocumentParams>(not.params)
-                        {
-                            let uri = params.text_document.uri.to_string();
-                            let mut state_w = state_for_loop.write().unwrap();
-                            state_w.cancel_task(&uri);
-                            state_w.document_versions.remove(&uri);
-                            state_w.document_content.remove(&uri);
-                            state_w.document_languages.remove(&uri);
-                            state_w.document_errors.remove(&uri);
-                        }
-                    }
-                    _ => {}
-                },
+                Message::Notification(not) => {
+                    // Notification path: didOpen, didChange, didClose.
+                    handle_notification(state_for_loop.clone(), &connection.sender, not)
+                }
+                // LSP responses are client-side in this server, so ignore them.
                 Message::Response(_) => {}
             }
         }
@@ -1033,6 +1118,160 @@ mod tests {
         });
 
         state.register_task(uri.clone(), handle2);
+    }
+
+    #[test]
+    fn test_handle_ignore_word_command_rechecks_document() {
+        let client = LanguageToolClient::new(ClientConfig {
+            base_url: "http://localhost:8081".to_string(),
+        });
+        let mut state_raw = ServerState::new(client);
+        let uri = "file:///tmp/test.rs".to_string();
+        state_raw.document_content.insert(uri.clone(), "/// testt".to_string());
+        state_raw.document_languages.insert(uri.clone(), "rust".to_string());
+        state_raw.document_versions.insert(uri.clone(), 1);
+        state_raw.document_errors.insert(uri.clone(), vec![GrammarError {
+            message: "Spelling".to_string(),
+            offset: 0,
+            length: 5,
+            replacements: vec!["test".to_string()],
+            rule_id: "SPELLING".to_string(),
+        }]);
+
+        let state = Arc::new(RwLock::new(state_raw));
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        let ignore_file = std::env::temp_dir().join("docolint-ignore-command-test.txt");
+        let _ = std::fs::remove_file(&ignore_file);
+
+        handle_ignore_word_command(
+            state,
+            sender,
+            lsp_types::ExecuteCommandParams {
+                command: "docolint.ignoreWord".to_string(),
+                arguments: vec![
+                    json!("testt"),
+                    json!(ignore_file.to_string_lossy().to_string()),
+                    json!(uri),
+                ],
+                work_done_progress_params: Default::default(),
+            },
+        );
+
+        match receiver.recv().unwrap() {
+            Message::Notification(not) => {
+                assert_eq!(not.method, "textDocument/publishDiagnostics");
+            }
+            _ => panic!("expected publishDiagnostics notification"),
+        }
+    }
+
+    #[test]
+    fn test_collect_code_actions_includes_ignore_and_replace() {
+        let client = LanguageToolClient::new(ClientConfig {
+            base_url: "http://localhost:8081".to_string(),
+        });
+        let mut state_raw = ServerState::new(client);
+        state_raw.workspace_root = Some(PathBuf::from("/workspaces/project"));
+        let uri: lsp_types::Uri = serde_json::from_str("\"file:///workspaces/project/src/file.rs\"").unwrap();
+        state_raw.document_content.insert(uri.to_string(), "testt".to_string());
+        let state = Arc::new(RwLock::new(state_raw));
+
+        let diag = Diagnostic {
+            range: Range {
+                start: Position { line: 0, character: 0 },
+                end: Position { line: 0, character: 5 },
+            },
+            data: Some(json!({ "replacements": ["test"] })),
+            ..Default::default()
+        };
+
+        let actions = collect_code_actions(
+            &state,
+            CodeActionParams {
+                text_document: lsp_types::TextDocumentIdentifier { uri },
+                range: Range {
+                    start: Position { line: 0, character: 0 },
+                    end: Position { line: 0, character: 5 },
+                },
+                context: lsp_types::CodeActionContext {
+                    diagnostics: vec![diag],
+                    only: None,
+                    trigger_kind: None,
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            },
+        );
+
+        assert!(actions.iter().any(|action| match action {
+            CodeActionOrCommand::CodeAction(action) => action.title.contains("Ignore 'testt'"),
+            _ => false,
+        }));
+        assert!(actions.iter().any(|action| match action {
+            CodeActionOrCommand::CodeAction(action) => action.title.contains("Replace with 'test'"),
+            _ => false,
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_handle_did_open_stores_document_state() {
+        let client = LanguageToolClient::new(ClientConfig {
+            base_url: "http://localhost:8081".to_string(),
+        });
+        let state = Arc::new(RwLock::new(ServerState::new(client)));
+        let (sender, _receiver) = crossbeam_channel::unbounded();
+
+        handle_did_open(
+            state.clone(),
+            sender,
+            DidOpenTextDocumentParams {
+                text_document: lsp_types::TextDocumentItem {
+                    uri: serde_json::from_str("\"file:///test.rs\"").unwrap(),
+                    language_id: "rust".to_string(),
+                    version: 3,
+                    text: "/// hello".to_string(),
+                },
+            },
+        );
+
+        let state_r = state.read().unwrap();
+        assert_eq!(state_r.document_versions.get("file:///test.rs"), Some(&3));
+        assert_eq!(state_r.document_languages.get("file:///test.rs").map(String::as_str), Some("rust"));
+        assert_eq!(state_r.document_content.get("file:///test.rs").map(String::as_str), Some("/// hello"));
+        assert!(state_r.in_flight_tasks.contains_key("file:///test.rs"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_did_close_clears_document_state() {
+        let client = LanguageToolClient::new(ClientConfig {
+            base_url: "http://localhost:8081".to_string(),
+        });
+        let mut state_raw = ServerState::new(client);
+        let uri = "file:///test.rs".to_string();
+        state_raw.document_versions.insert(uri.clone(), 1);
+        state_raw.document_languages.insert(uri.clone(), "rust".to_string());
+        state_raw.document_content.insert(uri.clone(), "/// hello".to_string());
+        state_raw.document_errors.insert(uri.clone(), vec![]);
+        state_raw.register_task(uri.clone(), tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }));
+        let state = Arc::new(RwLock::new(state_raw));
+
+        handle_did_close(
+            state.clone(),
+            DidCloseTextDocumentParams {
+                text_document: lsp_types::TextDocumentIdentifier {
+                    uri: serde_json::from_str("\"file:///test.rs\"").unwrap(),
+                },
+            },
+        );
+
+        let state_r = state.read().unwrap();
+        assert!(!state_r.document_versions.contains_key(&uri));
+        assert!(!state_r.document_languages.contains_key(&uri));
+        assert!(!state_r.document_content.contains_key(&uri));
+        assert!(!state_r.document_errors.contains_key(&uri));
+        assert!(!state_r.in_flight_tasks.contains_key(&uri));
     }
 
     #[test]

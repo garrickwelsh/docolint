@@ -21,15 +21,15 @@ fn read_message(reader: &mut BufReader<impl Read>) -> Option<String> {
         if trimmed.is_empty() {
             break;
         }
-        if trimmed.starts_with("Content-Length:") {
-            content_length = Some(trimmed["Content-Length:".len()..].trim().parse().ok()?);
+        if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
+            content_length = Some(rest.trim().parse().ok()?);
         }
     }
 
     let len = content_length?;
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf).ok()?;
-    Some(String::from_utf8(buf).ok()?)
+    String::from_utf8(buf).ok()
 }
 
 #[test]
@@ -98,23 +98,23 @@ fn test_full_lsp_flow_with_lt() {
     let mut found_diagnostic = false;
 
     while start.elapsed() < timeout {
-        if let Some(body) = read_message(&mut reader) {
-            if body.contains("textDocument/publishDiagnostics") {
-                let json: serde_json::Value = serde_json::from_str(&body).expect("Invalid JSON");
-                let diagnostics = json["params"]["diagnostics"].as_array().expect("diagnostics is not an array");
-                assert!(!diagnostics.is_empty(), "Expected at least one diagnostic");
+        if let Some(body) = read_message(&mut reader)
+            && body.contains("textDocument/publishDiagnostics")
+        {
+            let json: serde_json::Value = serde_json::from_str(&body).expect("Invalid JSON");
+            let diagnostics = json["params"]["diagnostics"].as_array().expect("diagnostics is not an array");
+            assert!(!diagnostics.is_empty(), "Expected at least one diagnostic");
 
-                let diag = &diagnostics[0];
-                assert!(diag["message"].as_str().is_some_and(|s| !s.is_empty()), "diagnostic message is empty");
-                assert_eq!(diag["source"].as_str(), Some("docolint"), "source is not 'docolint'");
-                assert!(diag["code"].is_string() || diag["code"].is_number(), "code is missing");
+            let diag = &diagnostics[0];
+            assert!(diag["message"].as_str().is_some_and(|s| !s.is_empty()), "diagnostic message is empty");
+            assert_eq!(diag["source"].as_str(), Some("docolint"), "source is not 'docolint'");
+            assert!(diag["code"].is_string() || diag["code"].is_number(), "code is missing");
 
-                let range = &diag["range"];
-                assert_eq!(range["start"]["line"].as_i64(), Some(0), "range start line is not 0");
+            let range = &diag["range"];
+            assert_eq!(range["start"]["line"].as_i64(), Some(0), "range start line is not 0");
 
-                found_diagnostic = true;
-                break;
-            }
+            found_diagnostic = true;
+            break;
         }
         std::thread::sleep(Duration::from_millis(200));
     }

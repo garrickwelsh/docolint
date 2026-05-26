@@ -392,8 +392,88 @@ fn extract_html_text(tree: &tree_sitter::Tree, content: &str) -> AnnotatedText {
     AnnotatedText { segments }
 }
 
+/// Returns `true` for Markdown node kinds treated as pure markup.
+///
+/// These nodes contribute structure or delimiters only, so they should never
+/// produce prose segments for grammar checking.
+fn is_markdown_markup_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "emphasis_delimiter"
+            | "link_destination"
+            | "["
+            | "]"
+            | "("
+            | ")"
+            | "atx_h1_marker"
+            | "atx_h2_marker"
+            | "atx_h3_marker"
+            | "atx_h4_marker"
+            | "atx_h5_marker"
+            | "atx_h6_marker"
+            | "fenced_code_block_delimiter"
+    )
+}
+
+/// Returns `true` when fenced code block should recurse into language parser.
+///
+/// Empty fences and unsupported languages stay skipped as markup.
+fn should_parse_fenced_code(lang: &str, code_content: &str) -> bool {
+    !code_content.is_empty() && (language_from_id(lang).is_some() || language_from_extension(lang).is_some())
+}
+
+/// Extracts fence language tag and raw code content from Markdown fenced block node.
+fn fenced_code_language_and_content<'a>(node: tree_sitter::Node<'a>, content: &'a str) -> (&'a str, &'a str) {
+    let mut lang = "unknown";
+    let mut code_content = "";
+
+    let mut child_cursor = node.walk();
+    if child_cursor.goto_first_child() {
+        loop {
+            let child = child_cursor.node();
+            match child.kind() {
+                "info_string" => {
+                    lang = child
+                        .utf8_text(content.as_bytes())
+                        .unwrap_or("unknown")
+                        .trim();
+                }
+                "code_fence_content" => {
+                    code_content = child.utf8_text(content.as_bytes()).unwrap_or("");
+                }
+                _ => {}
+            }
+            if !child_cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+
+    (lang, code_content)
+}
+
+/// Pushes non-empty, non-whitespace span as prose segment at original byte offset.
+fn push_nonempty_segment(segments: &mut Vec<TextSegment>, content: &str, start: usize, end: usize) {
+    if start >= end {
+        return;
+    }
+    let gap_text = &content[start..end];
+    if !gap_text.trim().is_empty() {
+        segments.push(TextSegment {
+            text: gap_text.to_string(),
+            is_markup: false,
+            offset: start,
+        });
+    }
+}
+
 /// Walk a Markdown AST and extract prose from inline nodes and recurse into
 /// fenced code blocks.
+///
+/// Uses `tree_sitter_md::MarkdownParser` to traverse block + inline Markdown
+/// structure. Plain prose comes from non-markup spans. Supported fenced code
+/// blocks recurse into language-specific parsers, then shift extracted segment
+/// offsets back into original Markdown document.
 fn extract_markdown_text(content: &str, config: &ParserConfig) -> AnnotatedText {
     let mut parser = tree_sitter_md::MarkdownParser::default();
     let tree = match parser.parse(content.as_bytes(), None) {
@@ -413,66 +493,25 @@ fn extract_markdown_text(content: &str, config: &ParserConfig) -> AnnotatedText 
         let node = cursor.node();
         let kind = node.kind();
 
-        // If it's a fenced code block, extract its content and recurse
+        // Fenced code blocks delegate into language-specific parsers when supported.
         if kind == "fenced_code_block" && !cursor.is_inline() {
-            let mut lang = "unknown";
-            let mut code_content = "";
-
-            let mut child_cursor = node.walk();
-            if child_cursor.goto_first_child() {
-                loop {
-                    let child = child_cursor.node();
-                    match child.kind() {
-                        "info_string" => {
-                            lang = child
-                                .utf8_text(content.as_bytes())
-                                .unwrap_or("unknown")
-                                .trim();
-                        }
-                        "code_fence_content" => {
-                            code_content = child.utf8_text(content.as_bytes()).unwrap_or("");
-                        }
-                        _ => {}
-                    }
-                    if !child_cursor.goto_next_sibling() {
-                        break;
-                    }
+            let (lang, code_content) = fenced_code_language_and_content(node, content);
+            if should_parse_fenced_code(lang, code_content) {
+                let content_start = code_fence_node_start(node, content);
+                let mut inner_annotated = parse_document(lang, code_content, config);
+                for segment in &mut inner_annotated.segments {
+                    segment.offset += content_start;
                 }
+                segments.extend(inner_annotated.segments);
             }
-
-                if !code_content.is_empty()
-                    && (language_from_id(lang).is_some() || language_from_extension(lang).is_some())
-                {
-                    let content_start = code_fence_node_start(node, content);
-                    let mut inner_annotated = parse_document(lang, code_content, config);
-                    for segment in &mut inner_annotated.segments {
-                        segment.offset += content_start;
-                    }
-                    segments.extend(inner_annotated.segments);
-                }
             return;
         }
 
-        // Handle gaps and children
+        // Track prose gaps between child nodes so inline markup delimiters disappear.
         let mut last_offset = node.start_byte();
 
-        // Nodes to skip entirely (and their content)
-        let is_markup = matches!(
-            kind,
-            "emphasis_delimiter"
-                | "link_destination"
-                | "["
-                | "]"
-                | "("
-                | ")"
-                | "atx_h1_marker"
-                | "atx_h2_marker"
-                | "atx_h3_marker"
-                | "atx_h4_marker"
-                | "atx_h5_marker"
-                | "atx_h6_marker"
-                | "fenced_code_block_delimiter"
-        );
+        // Skip pure markup nodes entirely.
+        let is_markup = is_markdown_markup_kind(kind);
 
         if is_markup {
             return;
@@ -481,16 +520,8 @@ fn extract_markdown_text(content: &str, config: &ParserConfig) -> AnnotatedText 
         if cursor.goto_first_child() {
             loop {
                 let child_start = cursor.node().start_byte();
-                if child_start > last_offset {
-                    let gap_text = &content[last_offset..child_start];
-                    if !gap_text.trim().is_empty() {
-                        segments.push(TextSegment {
-                            text: gap_text.to_string(),
-                            is_markup: false,
-                            offset: last_offset,
-                        });
-                    }
-                }
+                // Emit prose that sits between current child boundaries.
+                push_nonempty_segment(segments, content, last_offset, child_start);
 
                 walk(cursor, content, segments, config);
 
@@ -501,19 +532,11 @@ fn extract_markdown_text(content: &str, config: &ParserConfig) -> AnnotatedText 
             }
 
             let node_end = node.end_byte();
-            if last_offset < node_end {
-                let gap_text = &content[last_offset..node_end];
-                if !gap_text.trim().is_empty() {
-                    segments.push(TextSegment {
-                        text: gap_text.to_string(),
-                        is_markup: false,
-                        offset: last_offset,
-                    });
-                }
-            }
+            // Emit trailing prose after last child in current node.
+            push_nonempty_segment(segments, content, last_offset, node_end);
             cursor.goto_parent();
         } else {
-            // Leaf node
+            // Leaf nodes contribute prose directly when not structural containers.
             if !is_markup
                 && (kind == "inline"
                     || (kind != "paragraph" && kind != "document" && kind != "section"))
@@ -916,5 +939,20 @@ mod tests {
         let text = result.plain_text();
         assert!(text.contains("Title"));
         assert!(text.contains("Doc in Java"));
+    }
+
+    #[test]
+    fn test_should_parse_fenced_code() {
+        assert!(should_parse_fenced_code("rust", "/// doc"));
+        assert!(!should_parse_fenced_code("unknown", "/// doc"));
+        assert!(!should_parse_fenced_code("rust", ""));
+    }
+
+    #[test]
+    fn test_is_markdown_markup_kind() {
+        assert!(is_markdown_markup_kind("emphasis_delimiter"));
+        assert!(is_markdown_markup_kind("fenced_code_block_delimiter"));
+        assert!(!is_markdown_markup_kind("inline"));
+        assert!(!is_markdown_markup_kind("paragraph"));
     }
 }

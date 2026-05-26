@@ -114,3 +114,23 @@ pub fn parse_document(language_id: &str, content: &str, config: &ParserConfig) -
 - [x] **TDD Cycle 31**: Markdown recursive parsing with Java fenced blocks
 - [x] **TDD Cycle 32**: `include_inline_comments` flows from `InitializationOptions` → `ServerState` → `ParserConfig`
 - [x] Linting (`clippy`) and Typechecking (`cargo check`) — zero warnings
+
+## Phase 8: Long Function Readability Refactor
+Focus: Split long, multi-responsibility functions while preserving behavior.
+
+### Design Decisions
+See [docs/adr/0002-function-length-and-readability-refactor-policy.md](docs/adr/0002-function-length-and-readability-refactor-policy.md).
+
+### Stepwise Plan (each step updates this plan + writes handoff doc)
+- [x] **Step 1 (Red)**: Add parser tests for `extract_markdown_text` helper behavior.
+  - Handoff: `docs/handoff/phase-8-step-1-parser-red-tests.md`
+- [x] **Step 2 (Green/Refactor)**: Extract markdown parsing helpers from `extract_markdown_text`.
+  - Handoff: `docs/handoff/phase-8-step-2-parser-helper-extract.md`
+- [x] **Step 3 (Red)**: Add server tests for `run` request/notification handler behavior.
+  - Handoff: `docs/handoff/phase-8-step-3-server-red-tests.md`
+- [x] **Step 4 (Green/Refactor)**: Extract request handling from `run`.
+  - Handoff: `docs/handoff/phase-8-step-4-server-request-handlers.md`
+- [x] **Step 5 (Green/Refactor)**: Extract notification handling from `run`.
+  - Handoff: `docs/handoff/phase-8-step-5-server-notification-handlers.md`
+- [x] **Step 6 (Verify)**: Run full verification and update graph.
+  - Handoff: `docs/handoff/phase-8-step-6-verification-graph.md`

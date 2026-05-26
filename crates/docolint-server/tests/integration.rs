@@ -66,31 +66,29 @@ async fn test_did_open_diagnostic_flow() {
     let mut found_diagnostic = false;
 
     while start.elapsed() < timeout {
-        if let Ok(msg) = client_conn.receiver.recv_timeout(Duration::from_millis(100)) {
-            if let Message::Notification(not) = msg {
-                if not.method == "textDocument/publishDiagnostics" {
-                    let params: PublishDiagnosticsParams = serde_json::from_value(not.params).unwrap();
-                    assert_eq!(params.diagnostics.len(), 1);
-                    let diag = &params.diagnostics[0];
-                    assert_eq!(diag.severity, Some(DiagnosticSeverity::INFORMATION));
-                    assert_eq!(diag.source.as_deref(), Some("docolint"));
-                    assert!(diag.message.contains("spelling"), "message: {}", diag.message);
-                    if let Some(lsp_types::NumberOrString::String(rule_id)) = &diag.code {
-                        assert_eq!(rule_id, "MORFOLOGIK_RULE_EN_US");
-                    } else {
-                        panic!("Expected string rule ID");
-                    }
-                    assert_eq!(diag.range.start.line, 0);
-                    assert!(diag.range.start.character > 0);
-                    let data = diag.data.as_ref().expect("diagnostic data is missing");
-                    assert_eq!(data["rule_id"].as_str(), Some("MORFOLOGIK_RULE_EN_US"));
-                    let replacements = data["replacements"].as_array().expect("replacements should be an array");
-                    assert!(!replacements.is_empty(), "replacements should not be empty");
-                    assert_eq!(replacements[0].as_str(), Some("test"));
-                    found_diagnostic = true;
-                    break;
-                }
+        if let Ok(Message::Notification(not)) = client_conn.receiver.recv_timeout(Duration::from_millis(100))
+            && not.method == "textDocument/publishDiagnostics"
+        {
+            let params: PublishDiagnosticsParams = serde_json::from_value(not.params).unwrap();
+            assert_eq!(params.diagnostics.len(), 1);
+            let diag = &params.diagnostics[0];
+            assert_eq!(diag.severity, Some(DiagnosticSeverity::INFORMATION));
+            assert_eq!(diag.source.as_deref(), Some("docolint"));
+            assert!(diag.message.contains("spelling"), "message: {}", diag.message);
+            if let Some(lsp_types::NumberOrString::String(rule_id)) = &diag.code {
+                assert_eq!(rule_id, "MORFOLOGIK_RULE_EN_US");
+            } else {
+                panic!("Expected string rule ID");
             }
+            assert_eq!(diag.range.start.line, 0);
+            assert!(diag.range.start.character > 0);
+            let data = diag.data.as_ref().expect("diagnostic data is missing");
+            assert_eq!(data["rule_id"].as_str(), Some("MORFOLOGIK_RULE_EN_US"));
+            let replacements = data["replacements"].as_array().expect("replacements should be an array");
+            assert!(!replacements.is_empty(), "replacements should not be empty");
+            assert_eq!(replacements[0].as_str(), Some("test"));
+            found_diagnostic = true;
+            break;
         }
     }
 
