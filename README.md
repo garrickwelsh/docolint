@@ -10,20 +10,30 @@ Grammar and spelling checking for code comments and prose — powered by [Langua
 - **Inline diagnostics** — Grammar and spelling errors appear directly in your editor
 - **Quick fixes** — Apply suggested replacements or ignore words with a single action
 - **Hierarchical ignore files** — `.docolint-ignore` files work like `.gitignore`, scoped from file to workspace root
-- **Zero-config** — Auto-starts a LanguageTool Docker container if no server is reachable
+- **Zero-config** — Auto-starts a local LanguageTool container via Docker or Podman if no local server is reachable
 - **Multi-language** — Supports Rust, C#, HTML, Markdown, JavaScript, TypeScript, Python, Java, Bash, PowerShell, SCSS, CSS, and Lua
 
 ## Requirements
 
 A running LanguageTool HTTP server. By default, `docolint` expects one at `http://localhost:8081`.
 
-If no server is reachable and Docker is available, `docolint` will automatically start a container (`ghcr.io/garrickwelsh/languagetool`).
+If no local server is reachable and Docker or Podman is available, `docolint` will automatically start a container (`ghcr.io/garrickwelsh/languagetool`). Docker is tried first, then Podman.
 
-To run LanguageTool manually:
+When `docolint` runs inside a Docker-from-Docker devcontainer with Docker socket mounted from host, it starts LanguageTool with host networking so container shares devcontainer `localhost`. Otherwise it starts normally with `-p 8081:8081`.
+
+To run LanguageTool manually in a Docker-from-Docker devcontainer:
 
 ```bash
 docker run -d --network host ghcr.io/garrickwelsh/languagetool
 ```
+
+To run LanguageTool manually on host, Docker-in-Docker, or other non-host-network setups:
+
+```bash
+docker run -d -p 8081:8081 ghcr.io/garrickwelsh/languagetool
+```
+
+Equivalent Podman commands work too.
 
 ## Installation
 
@@ -118,7 +128,7 @@ vim.lsp.config('docolint', {
   settings = {
     initializationOptions = {
       endpoint = "http://localhost:8081",  -- optional, defaults to localhost:8081
-      stopOnExit = false,                   -- optional, stops auto-started Docker on shutdown
+      stopOnExit = false,                   -- optional but currently ignored; LT container is shared
     },
   },
 })

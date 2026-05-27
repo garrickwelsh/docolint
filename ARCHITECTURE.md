@@ -47,8 +47,8 @@ sequenceDiagram
     *   *Choice*: Isolate raw source logic from HTTP logic using `AnnotatedText`.
     *   *Trade-off*: Adds intermediate object overhead, but allows marking segments as `is_markup` so LanguageTool can ignore internal formatting (like Markdown bold tags) without breaking offset mapping.
 *   **Auto-Provisioned Infrastructure Fallback**: 
-    *   *Choice*: If the expected LanguageTool HTTP API is unreachable, `docolint-server` attempts to auto-start a local `ghcr.io/garrickwelsh/languagetool` Docker container.
-    *   *Trade-off*: Provides a zero-config experience for users with Docker. If Docker is missing and no LanguageTool instance exists, the user is no worse off than if it hadn't tried (graceful failure).
+*   *Choice*: If local LanguageTool HTTP API is unreachable, `docolint-server` attempts to auto-start shared local `ghcr.io/garrickwelsh/languagetool` container, trying Docker first then Podman. Docker-from-Docker environments use host networking; other environments publish port `8081:8081`.
+*   *Trade-off*: Provides zero-config local recovery across devcontainers and hosts without forcing Docker-specific behavior. Shared container lifecycle means `stopOnExit` cannot safely stop the service per editor instance.
 *   **Aggressive Modularization**: 
     *   *Choice*: Split logic into distinct `docolint-*` crates.
     *   *Trade-off*: Requires managing a Cargo workspace, but enforces strict boundaries and enables isolated testing.

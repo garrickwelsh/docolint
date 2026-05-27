@@ -13,8 +13,12 @@ use docolint_types::GrammarError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command as ProcessCommand;
 use std::sync::{Arc, RwLock};
+use std::thread;
 use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 use url::Url;
@@ -258,9 +262,9 @@ pub struct ServerState {
     pub error_cooldown: Duration,
     /// Root path of the workspace, used for dictionary loading and ignore actions.
     pub workspace_root: Option<PathBuf>,
-    /// Whether this server instance started a LanguageTool Docker container.
+    /// Whether this server instance attempted to auto-start a local LanguageTool container.
     pub started_lt: bool,
-    /// Whether to stop the LanguageTool Docker container on server shutdown.
+    /// Retained for config compatibility. Shared LanguageTool containers are not auto-stopped.
     pub stop_on_exit: bool,
     pub include_inline_comments: bool,
 }
@@ -336,20 +340,71 @@ impl ServerState {
 
 /// Deserialized from `InitializeParams.initialization_options`.
 ///
-/// Allows clients to configure the LanguageTool endpoint and container lifecycle behavior.
+/// Allows clients to configure the LanguageTool endpoint and parser behavior.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InitializationOptions {
     /// URL of the LanguageTool server. Defaults to `http://localhost:8081` if not provided.
     pub endpoint: Option<String>,
-    /// When `true`, stops the auto-started LanguageTool Docker container on shutdown.
-    /// Defaults to `false` if not provided.
+    /// Retained for compatibility but ignored because LanguageTool containers are shared.
     pub stop_on_exit: Option<bool>,
     pub include_inline_comments: Option<bool>,
 }
 
 const LT_DOCKER_IMAGE: &str = "ghcr.io/garrickwelsh/languagetool";
 const LT_CONTAINER_NAME: &str = "docolint-lt-server";
+const LT_CONTAINER_PORT: &str = "8081/tcp";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ContainerRuntime {
+    Docker,
+    Podman,
+}
+
+impl ContainerRuntime {
+    fn command_name(self) -> &'static str {
+        match self {
+            Self::Docker => "docker",
+            Self::Podman => "podman",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ContainerNetworkMode {
+    Host,
+    PublishedPort,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RuntimeContainerState {
+    network_mode: String,
+    port_binding: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CommandOutput {
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
+trait CommandRunner {
+    fn run(&self, runtime: ContainerRuntime, args: &[&str]) -> io::Result<CommandOutput>;
+}
+
+struct SystemCommandRunner;
+
+impl CommandRunner for SystemCommandRunner {
+    fn run(&self, runtime: ContainerRuntime, args: &[&str]) -> io::Result<CommandOutput> {
+        let output = ProcessCommand::new(runtime.command_name()).args(args).output()?;
+        Ok(CommandOutput {
+            success: output.status.success(),
+            stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        })
+    }
+}
 
 fn probe_language_tool(endpoint: &str) -> bool {
     let url = match Url::parse(endpoint) {
@@ -368,44 +423,245 @@ fn probe_language_tool(endpoint: &str) -> bool {
     std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)).is_ok()
 }
 
-fn start_language_tool(_endpoint: &str, sender: &crossbeam_channel::Sender<Message>) {
-    let show_message = |msg: &str| {
-        let params = lsp_types::ShowMessageParams {
-            typ: lsp_types::MessageType::INFO,
-            message: msg.to_string(),
-        };
-        let not = Notification::new("window/showMessage".to_string(), params);
-        let _ = sender.send(Message::Notification(not));
+fn show_info_message(sender: &crossbeam_channel::Sender<Message>, msg: &str) {
+    let params = lsp_types::ShowMessageParams {
+        typ: lsp_types::MessageType::INFO,
+        message: msg.to_string(),
+    };
+    let not = Notification::new("window/showMessage".to_string(), params);
+    let _ = sender.send(Message::Notification(not));
+}
+
+fn is_local_endpoint(endpoint: &str) -> bool {
+    let url = match Url::parse(endpoint) {
+        Ok(url) => url,
+        Err(_) => return false,
     };
 
-    show_message("LanguageTool not reachable. Starting Docker container...");
+    matches!(url.host_str(), Some("localhost") | Some("127.0.0.1") | Some("::1"))
+}
 
-    let start_result = std::process::Command::new("docker")
-        .args(["start", LT_CONTAINER_NAME])
-        .output();
+fn is_docker_from_docker_mount(mountinfo: &str) -> bool {
+    mountinfo.lines().any(|line| line.contains("sock") && line.contains("docker"))
+}
 
-    if start_result.is_ok() {
-        show_message("LanguageTool container started. Warming up...");
-        return;
+fn has_docker_from_docker_mount() -> bool {
+    fs::read_to_string("/proc/self/mountinfo")
+        .map(|mountinfo| is_docker_from_docker_mount(&mountinfo))
+        .unwrap_or(false)
+}
+
+fn expected_network_mode() -> ContainerNetworkMode {
+    if has_docker_from_docker_mount() {
+        ContainerNetworkMode::Host
+    } else {
+        ContainerNetworkMode::PublishedPort
+    }
+}
+
+fn runtime_is_usable(runner: &impl CommandRunner, runtime: ContainerRuntime) -> bool {
+    matches!(runner.run(runtime, &["--version"]), Ok(output) if output.success)
+        && matches!(runner.run(runtime, &["ps"]), Ok(output) if output.success)
+}
+
+fn inspect_container_state(
+    runner: &impl CommandRunner,
+    runtime: ContainerRuntime,
+) -> Option<RuntimeContainerState> {
+    let inspect = runner
+        .run(
+            runtime,
+            &["inspect", "--format", "{{.HostConfig.NetworkMode}}", LT_CONTAINER_NAME],
+        )
+        .ok()?;
+    if !inspect.success {
+        return None;
     }
 
-    let run_result = std::process::Command::new("docker")
-        .args([
-            "run", "-d",
-            "--network", "host",
-            "--name", LT_CONTAINER_NAME,
+    let port_binding = runner
+        .run(runtime, &["port", LT_CONTAINER_NAME, LT_CONTAINER_PORT])
+        .ok()
+        .filter(|output| output.success)
+        .map(|output| output.stdout);
+
+    Some(RuntimeContainerState {
+        network_mode: inspect.stdout,
+        port_binding,
+    })
+}
+
+fn published_port_matches(binding: Option<&str>) -> bool {
+    binding
+        .map(|binding| {
+            binding
+                .lines()
+                .any(|line| line.trim() == "8081" || line.contains(":8081"))
+        })
+        .unwrap_or(false)
+}
+
+fn container_matches_expected(
+    state: &RuntimeContainerState,
+    expected_mode: ContainerNetworkMode,
+) -> bool {
+    match expected_mode {
+        ContainerNetworkMode::Host => state.network_mode == "host",
+        ContainerNetworkMode::PublishedPort => {
+            state.network_mode != "host" && published_port_matches(state.port_binding.as_deref())
+        }
+    }
+}
+
+fn pull_language_tool_image(
+    runner: &impl CommandRunner,
+    runtime: ContainerRuntime,
+    sender: &crossbeam_channel::Sender<Message>,
+) -> bool {
+    show_info_message(sender, "Pulling LanguageTool image...");
+    let result = runner.run(runtime, &["pull", LT_DOCKER_IMAGE]);
+    if matches!(result, Ok(output) if output.success) {
+        show_info_message(sender, "LanguageTool image ready.");
+        true
+    } else {
+        false
+    }
+}
+
+fn start_existing_container(
+    runner: &impl CommandRunner,
+    runtime: ContainerRuntime,
+    sender: &crossbeam_channel::Sender<Message>,
+) -> bool {
+    show_info_message(sender, "Starting LanguageTool container...");
+    matches!(runner.run(runtime, &["start", LT_CONTAINER_NAME]), Ok(output) if output.success)
+}
+
+fn run_new_container(
+    runner: &impl CommandRunner,
+    runtime: ContainerRuntime,
+    mode: ContainerNetworkMode,
+    sender: &crossbeam_channel::Sender<Message>,
+) -> bool {
+    show_info_message(sender, "Starting LanguageTool container...");
+    let args = match mode {
+        ContainerNetworkMode::Host => vec![
+            "run",
+            "-d",
+            "--network",
+            "host",
+            "--name",
+            LT_CONTAINER_NAME,
             LT_DOCKER_IMAGE,
-        ])
-        .output();
+        ],
+        ContainerNetworkMode::PublishedPort => vec![
+            "run",
+            "-d",
+            "-p",
+            "8081:8081",
+            "--name",
+            LT_CONTAINER_NAME,
+            LT_DOCKER_IMAGE,
+        ],
+    };
 
-    match run_result {
-        Ok(output) if output.status.success() => {
-            show_message("LanguageTool container created. Warming up...");
-        }
-        _ => {
-            show_message("Failed to start LanguageTool via Docker. Check that Docker is running.");
+    matches!(runner.run(runtime, &args), Ok(output) if output.success)
+}
+
+fn remove_existing_container(runner: &impl CommandRunner, runtime: ContainerRuntime) -> bool {
+    matches!(runner.run(runtime, &["rm", "-f", LT_CONTAINER_NAME]), Ok(output) if output.success)
+}
+
+fn wait_for_language_tool_ready(
+    endpoint: &str,
+    sender: &crossbeam_channel::Sender<Message>,
+    probe: &impl Fn(&str) -> bool,
+) -> bool {
+    show_info_message(sender, "Waiting for LanguageTool...");
+    for _ in 0..40 {
+        thread::sleep(Duration::from_millis(250));
+        if probe(endpoint) {
+            show_info_message(sender, "LanguageTool ready.");
+            return true;
         }
     }
+
+    false
+}
+
+fn try_start_language_tool_with_runtime(
+    endpoint: &str,
+    sender: &crossbeam_channel::Sender<Message>,
+    runner: &impl CommandRunner,
+    runtime: ContainerRuntime,
+    mode: ContainerNetworkMode,
+    probe: &impl Fn(&str) -> bool,
+) -> bool {
+    match inspect_container_state(runner, runtime) {
+        Some(state) if container_matches_expected(&state, mode) => {
+            start_existing_container(runner, runtime, sender)
+                && wait_for_language_tool_ready(endpoint, sender, probe)
+        }
+        Some(_) => {
+            if !pull_language_tool_image(runner, runtime, sender) {
+                return false;
+            }
+            if !remove_existing_container(runner, runtime) {
+                return false;
+            }
+            run_new_container(runner, runtime, mode, sender)
+                && wait_for_language_tool_ready(endpoint, sender, probe)
+        }
+        None => {
+            if !pull_language_tool_image(runner, runtime, sender) {
+                return false;
+            }
+            run_new_container(runner, runtime, mode, sender)
+                && wait_for_language_tool_ready(endpoint, sender, probe)
+        }
+    }
+}
+
+fn ensure_language_tool_running_with(
+    endpoint: &str,
+    sender: &crossbeam_channel::Sender<Message>,
+    runner: &impl CommandRunner,
+    mode: ContainerNetworkMode,
+    probe: &impl Fn(&str) -> bool,
+) -> bool {
+    if !is_local_endpoint(endpoint) {
+        return false;
+    }
+
+    for runtime in [ContainerRuntime::Docker, ContainerRuntime::Podman] {
+        if !runtime_is_usable(runner, runtime) {
+            continue;
+        }
+
+        if try_start_language_tool_with_runtime(endpoint, sender, runner, runtime, mode, probe) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn ensure_language_tool_running(endpoint: &str, sender: &crossbeam_channel::Sender<Message>) -> bool {
+    let runner = SystemCommandRunner;
+    ensure_language_tool_running_with(
+        endpoint,
+        sender,
+        &runner,
+        expected_network_mode(),
+        &probe_language_tool,
+    )
+}
+
+fn recover_language_tool(endpoint: &str, sender: &crossbeam_channel::Sender<Message>) -> bool {
+    if probe_language_tool(endpoint) {
+        return true;
+    }
+
+    ensure_language_tool_running(endpoint, sender)
 }
 
 fn load_dictionary(state: &ServerState, uri: &str) -> Dictionary {
@@ -529,7 +785,10 @@ fn spawn_check(
             ParserConfig { include_inline_comments: s.include_inline_comments }
         };
         let annotated = parse_document(&lang, &content, &config);
-        let result = client.check(annotated.clone()).await;
+        let mut result = client.check(annotated.clone()).await;
+        if result.is_err() && recover_language_tool(client.base_url(), &sender_task) {
+            result = client.check(annotated.clone()).await;
+        }
 
         match result {
             Ok(errors) => {
@@ -772,9 +1031,7 @@ fn handle_notification(
 /// Stops auto-started LanguageTool container when shutdown policy requires it.
 fn stop_language_tool_if_needed(state: &Arc<RwLock<ServerState>>) {
     if state.read().unwrap().stop_on_exit {
-        let _ = std::process::Command::new("docker")
-            .args(["stop", LT_CONTAINER_NAME])
-            .output();
+        // Auto-started LanguageTool acts as shared infra across docolint instances.
     }
 }
 
@@ -802,8 +1059,9 @@ fn handle_request(
 
 /// Main server entry point. Runs the LSP event loop on the given connection.
 ///
-/// Initializes server state, probes for LanguageTool availability (auto-starts Docker
-/// if unreachable), then blocks on the connection receiver processing LSP messages:
+/// Initializes server state, probes for LanguageTool availability (auto-starts local
+/// Docker/Podman container when appropriate), then blocks on the connection receiver
+/// processing LSP messages:
 /// - `textDocument/didOpen`, `didChange`: spawns debounced async grammar checks
 /// - `textDocument/didClose`: cancels pending tasks and clears document state
 /// - `textDocument/codeAction`: generates replacement and ignore-word quick fixes
@@ -850,9 +1108,8 @@ pub async fn run(
     state_raw.include_inline_comments = include_inline_comments;
     let state = Arc::new(RwLock::new(state_raw));
 
-    // Ensure LanguageTool is reachable before entering blocking LSP receive loop.
-    if !probe_language_tool(&endpoint) {
-        start_language_tool(&endpoint, &connection.sender);
+    // Ensure local/default LanguageTool is reachable before entering blocking LSP receive loop.
+    if !probe_language_tool(&endpoint) && ensure_language_tool_running(&endpoint, &connection.sender) {
         state.write().unwrap().started_lt = true;
     }
 
@@ -903,6 +1160,56 @@ mod tests {
     use super::*;
     use lsp_types::InitializeParams;
     use serde_json::json;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct FakeCommandRunner {
+        responses: HashMap<String, Result<CommandOutput, String>>,
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl FakeCommandRunner {
+        fn with_response(mut self, runtime: ContainerRuntime, args: &[&str], success: bool, stdout: &str) -> Self {
+            self.responses.insert(
+                Self::key(runtime, args),
+                Ok(CommandOutput {
+                    success,
+                    stdout: stdout.to_string(),
+                    stderr: String::new(),
+                }),
+            );
+            self
+        }
+
+        fn with_error(mut self, runtime: ContainerRuntime, args: &[&str]) -> Self {
+            self.responses.insert(
+                Self::key(runtime, args),
+                Err("command failed".to_string()),
+            );
+            self
+        }
+
+        fn calls(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+
+        fn key(runtime: ContainerRuntime, args: &[&str]) -> String {
+            format!("{} {}", runtime.command_name(), args.join(" "))
+        }
+    }
+
+    impl CommandRunner for FakeCommandRunner {
+        fn run(&self, runtime: ContainerRuntime, args: &[&str]) -> io::Result<CommandOutput> {
+            let key = Self::key(runtime, args);
+            self.calls.lock().unwrap().push(key.clone());
+            self.responses
+                .get(&key)
+                .cloned()
+                .unwrap_or_else(|| Err(key.clone()))
+                .map_err(io::Error::other)
+        }
+    }
 
     #[tokio::test]
     async fn test_initialization_options_extraction() {
@@ -919,6 +1226,127 @@ mod tests {
         drop(client_conn);
         let result = server_handle.await.unwrap();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_is_local_endpoint() {
+        assert!(is_local_endpoint("http://localhost:8081"));
+        assert!(is_local_endpoint("http://127.0.0.1:8081"));
+        assert!(!is_local_endpoint("http://lt.internal:8081"));
+    }
+
+    #[test]
+    fn test_docker_from_docker_mount_detection() {
+        assert!(is_docker_from_docker_mount(
+            "123 456 0:42 / /var/run/docker.sock rw,nosuid - tmpfs tmpfs rw"
+        ));
+        assert!(!is_docker_from_docker_mount(
+            "123 456 0:42 / /var/run/podman.sock rw,nosuid - tmpfs tmpfs rw"
+        ));
+    }
+
+    #[test]
+    fn test_ensure_language_tool_uses_podman_when_docker_unusable() {
+        let runner = FakeCommandRunner::default()
+            .with_response(ContainerRuntime::Docker, &["--version"], true, "Docker version")
+            .with_response(ContainerRuntime::Docker, &["ps"], false, "")
+            .with_response(ContainerRuntime::Podman, &["--version"], true, "podman version")
+            .with_response(ContainerRuntime::Podman, &["ps"], true, "")
+            .with_error(
+                ContainerRuntime::Podman,
+                &["inspect", "--format", "{{.HostConfig.NetworkMode}}", LT_CONTAINER_NAME],
+            )
+            .with_response(ContainerRuntime::Podman, &["pull", LT_DOCKER_IMAGE], true, "")
+            .with_response(
+                ContainerRuntime::Podman,
+                &[
+                    "run",
+                    "-d",
+                    "-p",
+                    "8081:8081",
+                    "--name",
+                    LT_CONTAINER_NAME,
+                    LT_DOCKER_IMAGE,
+                ],
+                true,
+                "",
+            );
+        let (sender, _receiver) = crossbeam_channel::unbounded();
+
+        let ready = ensure_language_tool_running_with(
+            "http://localhost:8081",
+            &sender,
+            &runner,
+            ContainerNetworkMode::PublishedPort,
+            &|_| true,
+        );
+
+        assert!(ready);
+        assert_eq!(
+            runner.calls(),
+            vec![
+                "docker --version",
+                "docker ps",
+                "podman --version",
+                "podman ps",
+                "podman inspect --format {{.HostConfig.NetworkMode}} docolint-lt-server",
+                "podman pull ghcr.io/garrickwelsh/languagetool",
+                "podman run -d -p 8081:8081 --name docolint-lt-server ghcr.io/garrickwelsh/languagetool",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_wrong_network_container_is_recreated_after_pull() {
+        let runner = FakeCommandRunner::default()
+            .with_response(ContainerRuntime::Docker, &["--version"], true, "Docker version")
+            .with_response(ContainerRuntime::Docker, &["ps"], true, "")
+            .with_response(
+                ContainerRuntime::Docker,
+                &["inspect", "--format", "{{.HostConfig.NetworkMode}}", LT_CONTAINER_NAME],
+                true,
+                "bridge",
+            )
+            .with_response(ContainerRuntime::Docker, &["port", LT_CONTAINER_NAME, LT_CONTAINER_PORT], true, "")
+            .with_response(ContainerRuntime::Docker, &["pull", LT_DOCKER_IMAGE], true, "")
+            .with_response(ContainerRuntime::Docker, &["rm", "-f", LT_CONTAINER_NAME], true, "")
+            .with_response(
+                ContainerRuntime::Docker,
+                &[
+                    "run",
+                    "-d",
+                    "--network",
+                    "host",
+                    "--name",
+                    LT_CONTAINER_NAME,
+                    LT_DOCKER_IMAGE,
+                ],
+                true,
+                "",
+            );
+        let (sender, _receiver) = crossbeam_channel::unbounded();
+
+        let ready = ensure_language_tool_running_with(
+            "http://localhost:8081",
+            &sender,
+            &runner,
+            ContainerNetworkMode::Host,
+            &|_| true,
+        );
+
+        assert!(ready);
+        assert_eq!(
+            runner.calls(),
+            vec![
+                "docker --version",
+                "docker ps",
+                "docker inspect --format {{.HostConfig.NetworkMode}} docolint-lt-server",
+                "docker port docolint-lt-server 8081/tcp",
+                "docker pull ghcr.io/garrickwelsh/languagetool",
+                "docker rm -f docolint-lt-server",
+                "docker run -d --network host --name docolint-lt-server ghcr.io/garrickwelsh/languagetool",
+            ]
+        );
     }
 
     #[test]

@@ -15,4 +15,7 @@ A Language Server Protocol (LSP) implementation in Rust that integrates Language
 - **LSP Server**: The main process implementing the LSP specification using `lsp-server`.
 - **Tree-sitter Manager**: The component responsible for language identification and extracting "checkable" text blocks (comments, visible HTML text, etc.).
 - **LanguageTool Client**: The HTTP client that communicates with the local LanguageTool server.
+- **LanguageTool Container**: Shared local container named `docolint-lt-server` that provides LanguageTool HTTP API when no local service is already reachable.
+- **Container Runtime**: Local container CLI used to manage LanguageTool Container. `docolint` tries Docker first, then Podman.
+- **Docker-from-Docker**: Development environment where current container has Docker socket mounted from host. In this mode LanguageTool Container must use host networking to share `localhost` with editor and server process.
 - **Diagnostic Mapper**: The logic that converts LanguageTool matches into LSP `Diagnostic` objects using offset translation.
