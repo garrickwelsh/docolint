@@ -458,7 +458,9 @@ fn push_nonempty_segment(segments: &mut Vec<TextSegment>, content: &str, start: 
         return;
     }
     let gap_text = &content[start..end];
-    if !gap_text.trim().is_empty() {
+    // Preserve newline-only gaps between block nodes so LanguageTool does not
+    // concatenate adjacent lines or paragraphs into a single sentence.
+    if !gap_text.trim().is_empty() || gap_text.contains(['\n', '\r']) {
         segments.push(TextSegment {
             text: gap_text.to_string(),
             is_markup: false,
@@ -807,6 +809,20 @@ mod tests {
         assert!(text.contains("Hello world"));
         assert!(text.contains("More prose here"));
         assert!(!text.contains("Check me not"));
+    }
+
+    #[test]
+    fn test_markdown_preserves_blank_line_gaps_between_blocks() {
+        let src = concat!(
+            "When `docolint` runs inside a Docker-from-Docker devcontainer ",
+            "with Docker socket mounted from host, it starts LanguageTool with ",
+            "host networking so container shares devcontainer `localhost`.\n\n",
+            "To run LanguageTool manually in a Docker-from-Docker devcontainer:\n"
+        );
+        let result = parse_document("markdown", src, &ParserConfig::default());
+        let text = result.plain_text();
+
+        assert!(text.contains("localhost`.\n\nTo run LanguageTool manually"), "got: {text:?}");
     }
 
     // ── Cycle 9: Absolute byte offset tracking ──────────────────────────────

@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::io;
+use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::sync::{Arc, RwLock};
@@ -178,6 +179,15 @@ pub fn generate_replacement_actions(
 
 use docolint_types::AnnotatedText;
 
+/// Converts a character offset inside plain text to byte offset inside a UTF-8 string.
+fn char_offset_to_byte_offset(text: &str, char_offset: usize) -> Option<usize> {
+    if char_offset == text.chars().count() {
+        return Some(text.len());
+    }
+
+    text.char_indices().nth(char_offset).map(|(idx, _)| idx)
+}
+
 /// Maps a LanguageTool offset (relative to plain text) to an absolute byte offset
 /// in the original source file.
 ///
@@ -187,24 +197,35 @@ use docolint_types::AnnotatedText;
 ///
 /// # Arguments
 /// * `text` - The `AnnotatedText` used in the LanguageTool request.
-/// * `lt_offset` - Byte offset relative to the concatenated plain text.
+/// * `lt_offset` - Character offset relative to the concatenated plain text.
 ///
 /// # Returns
 /// `Some(absolute_offset)` if the offset maps to a valid non-markup segment,
 /// `None` if the offset falls outside all segments or within markup.
 pub fn map_lt_offset_to_absolute(text: &AnnotatedText, lt_offset: usize) -> Option<usize> {
     let mut current_lt_offset = 0;
+    let mut last_segment_end = None;
     for segment in &text.segments {
         if segment.is_markup {
             continue;
         }
-        let next_lt_offset = current_lt_offset + segment.text.len();
+        let segment_char_len = segment.text.chars().count();
+        let next_lt_offset = current_lt_offset + segment_char_len;
         if lt_offset >= current_lt_offset && lt_offset < next_lt_offset {
             let offset_in_segment = lt_offset - current_lt_offset;
-            return Some(segment.offset + offset_in_segment);
+            let byte_offset = char_offset_to_byte_offset(&segment.text, offset_in_segment)?;
+            return Some(segment.offset + byte_offset);
+        }
+        if lt_offset == next_lt_offset {
+            last_segment_end = Some(segment.offset + segment.text.len());
         }
         current_lt_offset = next_lt_offset;
     }
+
+    if lt_offset == current_lt_offset {
+        return last_segment_end;
+    }
+
     None
 }
 
@@ -416,11 +437,14 @@ fn probe_language_tool(endpoint: &str) -> bool {
         None => return false,
     };
     let port = url.port_or_known_default().unwrap_or(8081);
-    let addr = match format!("{}:{}", host, port).parse::<std::net::SocketAddr>() {
-        Ok(a) => a,
+    let addrs = match (host, port).to_socket_addrs() {
+        Ok(addrs) => addrs.collect::<Vec<_>>(),
         Err(_) => return false,
     };
-    std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)).is_ok()
+
+    addrs
+        .iter()
+        .any(|addr| std::net::TcpStream::connect_timeout(addr, Duration::from_secs(2)).is_ok())
 }
 
 fn show_info_message(sender: &crossbeam_channel::Sender<Message>, msg: &str) {
@@ -518,7 +542,7 @@ fn pull_language_tool_image(
     sender: &crossbeam_channel::Sender<Message>,
 ) -> bool {
     show_info_message(sender, "Pulling LanguageTool image...");
-    let result = runner.run(runtime, &["pull", LT_DOCKER_IMAGE]);
+    let result = runner.run(runtime, &["pull", "-q", LT_DOCKER_IMAGE]);
     if matches!(result, Ok(output) if output.success) {
         show_info_message(sender, "LanguageTool image ready.");
         true
@@ -700,7 +724,9 @@ fn publish_diagnostics(
     for err in filtered {
         if let Some(abs_offset) = map_lt_offset_to_absolute(annotated, err.offset) {
             let start = offset_to_position(content, abs_offset);
-            let end = offset_to_position(content, abs_offset + err.length);
+            let end_abs_offset = map_lt_offset_to_absolute(annotated, err.offset + err.length)
+                .unwrap_or(abs_offset);
+            let end = offset_to_position(content, end_abs_offset);
 
             diagnostics.push(Diagnostic {
                 range: Range { start, end },
@@ -1246,6 +1272,14 @@ mod tests {
     }
 
     #[test]
+    fn test_probe_language_tool_resolves_localhost() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        assert!(probe_language_tool(&format!("http://localhost:{port}")));
+    }
+
+    #[test]
     fn test_ensure_language_tool_uses_podman_when_docker_unusable() {
         let runner = FakeCommandRunner::default()
             .with_response(ContainerRuntime::Docker, &["--version"], true, "Docker version")
@@ -1256,7 +1290,7 @@ mod tests {
                 ContainerRuntime::Podman,
                 &["inspect", "--format", "{{.HostConfig.NetworkMode}}", LT_CONTAINER_NAME],
             )
-            .with_response(ContainerRuntime::Podman, &["pull", LT_DOCKER_IMAGE], true, "")
+            .with_response(ContainerRuntime::Podman, &["pull", "-q", LT_DOCKER_IMAGE], true, "")
             .with_response(
                 ContainerRuntime::Podman,
                 &[
@@ -1290,7 +1324,7 @@ mod tests {
                 "podman --version",
                 "podman ps",
                 "podman inspect --format {{.HostConfig.NetworkMode}} docolint-lt-server",
-                "podman pull ghcr.io/garrickwelsh/languagetool",
+                "podman pull -q ghcr.io/garrickwelsh/languagetool",
                 "podman run -d -p 8081:8081 --name docolint-lt-server ghcr.io/garrickwelsh/languagetool",
             ]
         );
@@ -1308,7 +1342,7 @@ mod tests {
                 "bridge",
             )
             .with_response(ContainerRuntime::Docker, &["port", LT_CONTAINER_NAME, LT_CONTAINER_PORT], true, "")
-            .with_response(ContainerRuntime::Docker, &["pull", LT_DOCKER_IMAGE], true, "")
+            .with_response(ContainerRuntime::Docker, &["pull", "-q", LT_DOCKER_IMAGE], true, "")
             .with_response(ContainerRuntime::Docker, &["rm", "-f", LT_CONTAINER_NAME], true, "")
             .with_response(
                 ContainerRuntime::Docker,
@@ -1342,7 +1376,7 @@ mod tests {
                 "docker ps",
                 "docker inspect --format {{.HostConfig.NetworkMode}} docolint-lt-server",
                 "docker port docolint-lt-server 8081/tcp",
-                "docker pull ghcr.io/garrickwelsh/languagetool",
+                "docker pull -q ghcr.io/garrickwelsh/languagetool",
                 "docker rm -f docolint-lt-server",
                 "docker run -d --network host --name docolint-lt-server ghcr.io/garrickwelsh/languagetool",
             ]
@@ -1375,7 +1409,22 @@ mod tests {
         assert_eq!(map_lt_offset_to_absolute(&text, 0), Some(0)); // 'H'
         assert_eq!(map_lt_offset_to_absolute(&text, 6), Some(9)); // 'w'
         assert_eq!(map_lt_offset_to_absolute(&text, 10), Some(13)); // 'd'
-        assert_eq!(map_lt_offset_to_absolute(&text, 11), None);
+        assert_eq!(map_lt_offset_to_absolute(&text, 11), Some(14));
+    }
+
+    #[test]
+    fn test_offset_mapping_handles_unicode() {
+        use docolint_types::TextSegment;
+        let text = AnnotatedText {
+            segments: vec![TextSegment {
+                text: "alpha ❌ beta".to_string(),
+                is_markup: false,
+                offset: 0,
+            }],
+        };
+
+        assert_eq!(map_lt_offset_to_absolute(&text, 6), Some(6));
+        assert_eq!(map_lt_offset_to_absolute(&text, 7), Some(9));
     }
 
     #[test]

@@ -20,6 +20,14 @@ impl Default for Dictionary {
 }
 
 impl Dictionary {
+    fn char_offset_to_byte_offset(text: &str, char_offset: usize) -> Option<usize> {
+        if char_offset == text.chars().count() {
+            return Some(text.len());
+        }
+
+        text.char_indices().nth(char_offset).map(|(idx, _)| idx)
+    }
+
     /// Creates an empty dictionary with no ignored words.
     pub fn new() -> Self {
         Self {
@@ -121,10 +129,15 @@ impl Dictionary {
     /// A new `Vec` containing only errors whose matched word is not ignored.
     pub fn filter_errors(&self, text: &str, errors: Vec<GrammarError>) -> Vec<GrammarError> {
         errors.into_iter().filter(|error| {
-            if error.offset + error.length > text.len() {
+            let Some(start) = Self::char_offset_to_byte_offset(text, error.offset) else {
                 return true;
-            }
-            let word = &text[error.offset..(error.offset + error.length)];
+            };
+            let Some(end) = Self::char_offset_to_byte_offset(text, error.offset + error.length) else {
+                return true;
+            };
+            let Some(word) = text.get(start..end) else {
+                return true;
+            };
             !self.is_ignored(word)
         }).collect()
     }
@@ -208,5 +221,23 @@ mod tests {
         
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].rule_id, "RULE2");
+    }
+
+    #[test]
+    fn test_filter_errors_handles_unicode_offsets() {
+        let mut dict = Dictionary::new();
+        dict.ignored_words.insert("❌".to_string());
+
+        let text = "alpha ❌ beta";
+        let errors = vec![GrammarError {
+            message: "Error".to_string(),
+            offset: 6,
+            length: 1,
+            replacements: vec![],
+            rule_id: "RULE1".to_string(),
+        }];
+
+        let filtered = dict.filter_errors(text, errors);
+        assert!(filtered.is_empty());
     }
 }
