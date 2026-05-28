@@ -114,6 +114,12 @@ pub fn parse_document(language_id: &str, content: &str, config: &ParserConfig) -
 - [x] **TDD Cycle 31**: Markdown recursive parsing with Java fenced blocks
 - [x] **TDD Cycle 32**: `include_inline_comments` flows from `InitializationOptions` → `ServerState` → `ParserConfig`
 - [x] Linting (`clippy`) and Typechecking (`cargo check`) — zero warnings
+- [ ] Future: Refactor Rust/C# custom extractors and generic comment extractor toward shared path if offset precision and doc-comment behavior can stay intact.
+- [ ] Future: Investigate optional filtering for code-like inline comments to reduce false positives in opt-in inline comment checking.
+- [ ] Future: Add nested parser support for structured doc comment text such as C# XML documentation comments so tags can be treated as markup and prose checked more precisely.
+- [ ] Future: Improve stripped block comment offset mapping so diagnostics can start at exact prose position after leading `*` prefixes, not coarse post-delimiter offsets.
+- [ ] Future: Normalize leading `*` prefixes in non-doc multi-line block comments without losing precise diagnostic offset mapping.
+- [ ] Future: Improve C# doc comment offset mapping so stripped `///` and XML doc content map diagnostics to exact prose positions.
 
 ## Phase 8: Long Function Readability Refactor
 Focus: Split long, multi-responsibility functions while preserving behavior.

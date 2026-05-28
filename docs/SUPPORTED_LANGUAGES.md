@@ -2,8 +2,8 @@
 
 | Language | Doc Comments | Inline Comments | Notes |
 |---|---|---|---|
-| Rust | ✅ `///`, `/** */` | ❌ | |
-| C# | ✅ `///`, `/** */` | ❌ | |
+| Rust | ✅ `///`, `//!`, `/** */`, `/*! */` | ⚙️ `//`, `/* */` | Configurable |
+| C# | ✅ `///`, `/** */` | ⚙️ `//`, `/* */` | Configurable |
 | JavaScript | ✅ `/** */` | ⚙️ `//` | Configurable |
 | TypeScript | ✅ `/** */` | ⚙️ `//` | Configurable |
 | Python | ✅ `#` | | All comments |

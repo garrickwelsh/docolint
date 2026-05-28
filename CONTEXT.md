@@ -6,6 +6,7 @@ A Language Server Protocol (LSP) implementation in Rust that integrates Language
 
 ### Core Concepts
 - **docolint**: The project name. A Rust-based LSP server for documentation grammar checking with optional LanguageTool dictionary spelling checks.
+- **Inline Comment Inclusion**: Configuration that includes non-documentation comments in grammar and spelling checks for languages that distinguish documentation comments from inline comments.
 - **LanguageTool Language**: Configured LanguageTool language code (for example `en-US` or `en-AU`) used for requests and for deriving the dictionary spelling rule ID when spell checking is disabled.
 - **Local Truth**: A dictionary pattern where a project-local file (`.docolint-ignore`) is the single source of truth for ignored words, rather than the server's internal state.
 - **Recursive Parsing**: The process of parsing a document (e.g., Markdown), identifying code blocks, and then running a second parsing pass on those blocks using the appropriate language grammar to extract comments.

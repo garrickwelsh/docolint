@@ -90,12 +90,19 @@ impl LanguageToolClient {
 
         let resp = self.client.post(&url).form(&params).send().await?;
         let lt_resp: LTCheckResponse = resp.json().await?;
-        Ok(lt_resp.matches.into_iter().map(GrammarError::from).collect())
+        Ok(lt_resp
+            .matches
+            .into_iter()
+            .map(GrammarError::from)
+            .collect())
     }
 }
 
 fn spelling_rule_id(language: &str) -> String {
-    format!("MORFOLOGIK_RULE_{}", language.replace('-', "_").to_uppercase())
+    format!(
+        "MORFOLOGIK_RULE_{}",
+        language.replace('-', "_").to_uppercase()
+    )
 }
 
 #[derive(Deserialize)]
@@ -137,8 +144,8 @@ impl From<LTMatch> for GrammarError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::{Mock, MockServer, ResponseTemplate};
     use wiremock::matchers::{body_string_contains, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn test_new_with_localhost() {
@@ -247,11 +254,31 @@ mod tests {
 
         let text = AnnotatedText {
             segments: vec![
-                TextSegment { text: "Hello ".to_string(), is_markup: false, offset: 0 },
-                TextSegment { text: "<b>".to_string(), is_markup: true, offset: 6 },
-                TextSegment { text: "wurld".to_string(), is_markup: false, offset: 9 },
-                TextSegment { text: "</b>".to_string(), is_markup: true, offset: 14 },
-                TextSegment { text: "!".to_string(), is_markup: false, offset: 18 },
+                TextSegment {
+                    text: "Hello ".to_string(),
+                    is_markup: false,
+                    offset: 0,
+                },
+                TextSegment {
+                    text: "<b>".to_string(),
+                    is_markup: true,
+                    offset: 6,
+                },
+                TextSegment {
+                    text: "wurld".to_string(),
+                    is_markup: false,
+                    offset: 9,
+                },
+                TextSegment {
+                    text: "</b>".to_string(),
+                    is_markup: true,
+                    offset: 14,
+                },
+                TextSegment {
+                    text: "!".to_string(),
+                    is_markup: false,
+                    offset: 18,
+                },
             ],
         };
 
@@ -314,11 +341,31 @@ mod tests {
     fn test_plain_text_extraction() {
         let text = AnnotatedText {
             segments: vec![
-                TextSegment { text: "Hello ".to_string(), is_markup: false, offset: 0 },
-                TextSegment { text: "<b>".to_string(), is_markup: true, offset: 6 },
-                TextSegment { text: "world".to_string(), is_markup: false, offset: 9 },
-                TextSegment { text: "</b>".to_string(), is_markup: true, offset: 14 },
-                TextSegment { text: "!".to_string(), is_markup: false, offset: 18 },
+                TextSegment {
+                    text: "Hello ".to_string(),
+                    is_markup: false,
+                    offset: 0,
+                },
+                TextSegment {
+                    text: "<b>".to_string(),
+                    is_markup: true,
+                    offset: 6,
+                },
+                TextSegment {
+                    text: "world".to_string(),
+                    is_markup: false,
+                    offset: 9,
+                },
+                TextSegment {
+                    text: "</b>".to_string(),
+                    is_markup: true,
+                    offset: 14,
+                },
+                TextSegment {
+                    text: "!".to_string(),
+                    is_markup: false,
+                    offset: 18,
+                },
             ],
         };
         assert_eq!(text.plain_text(), "Hello world!");

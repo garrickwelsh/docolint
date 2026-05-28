@@ -65,8 +65,7 @@ fn language_from_extension(ext: &str) -> Option<tree_sitter::Language> {
 /// An [`AnnotatedText`] containing ordered text segments with byte offsets mapped
 /// back to the original content.
 pub fn parse_document(language_id: &str, content: &str, config: &ParserConfig) -> AnnotatedText {
-    let lang = language_from_id(language_id)
-        .or_else(|| language_from_extension(language_id));
+    let lang = language_from_id(language_id).or_else(|| language_from_extension(language_id));
 
     match lang {
         Some(language) => extract_text(language_id, language, content, config),
@@ -74,7 +73,12 @@ pub fn parse_document(language_id: &str, content: &str, config: &ParserConfig) -
     }
 }
 
-fn extract_text(language_id: &str, language: tree_sitter::Language, content: &str, config: &ParserConfig) -> AnnotatedText {
+fn extract_text(
+    language_id: &str,
+    language: tree_sitter::Language,
+    content: &str,
+    config: &ParserConfig,
+) -> AnnotatedText {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&language).ok();
     let tree = match parser.parse(content, None) {
@@ -83,8 +87,8 @@ fn extract_text(language_id: &str, language: tree_sitter::Language, content: &st
     };
 
     match language_id {
-        "rust" | "rs" => extract_rust_docs(&tree, content),
-        "csharp" | "c#" | "cs" => extract_csharp_docs(&tree, content),
+        "rust" | "rs" => extract_rust_docs(&tree, content, config),
+        "csharp" | "c#" | "cs" => extract_csharp_docs(&tree, content, config),
         "html" => extract_html_text(&tree, content),
         "markdown" | "md" => extract_markdown_text(content, config),
         "css" => extract_comment_docs(&tree, content, language_id, config),
@@ -109,12 +113,18 @@ fn extract_text(language_id: &str, language: tree_sitter::Language, content: &st
 ///   - `//` and `/* non-doc */` only if config.include_inline_comments
 ///
 /// For languages without doc conventions, all comments are extracted.
-fn extract_comment_docs(tree: &tree_sitter::Tree, content: &str, language_id: &str, config: &ParserConfig) -> AnnotatedText {
+fn extract_comment_docs(
+    tree: &tree_sitter::Tree,
+    content: &str,
+    language_id: &str,
+    config: &ParserConfig,
+) -> AnnotatedText {
     let mut segments: Vec<TextSegment> = Vec::new();
     let mut cursor = tree.walk();
     let bytes = content.as_bytes();
 
-    let has_doc_comments = matches!(language_id,
+    let has_doc_comments = matches!(
+        language_id,
         "javascript" | "js" | "typescript" | "ts" | "tsx" | "java"
     );
 
@@ -151,7 +161,13 @@ fn extract_comment_docs(tree: &tree_sitter::Tree, content: &str, language_id: &s
         }
     }
 
-    walk(&mut cursor, bytes, &mut segments, has_doc_comments, config.include_inline_comments);
+    walk(
+        &mut cursor,
+        bytes,
+        &mut segments,
+        has_doc_comments,
+        config.include_inline_comments,
+    );
     AnnotatedText { segments }
 }
 
@@ -159,7 +175,11 @@ fn extract_comment_docs(tree: &tree_sitter::Tree, content: &str, language_id: &s
 /// Returns None if the comment should be skipped.
 ///
 /// For doc-comment languages: returns None for inline comments when include_inline is false.
-fn strip_comment_delimiters(raw: &str, has_doc_comments: bool, include_inline: bool) -> Option<String> {
+fn strip_comment_delimiters(
+    raw: &str,
+    has_doc_comments: bool,
+    include_inline: bool,
+) -> Option<String> {
     let trimmed = raw.trim();
 
     if has_doc_comments {
@@ -176,19 +196,35 @@ fn strip_comment_delimiters(raw: &str, has_doc_comments: bool, include_inline: b
                 .to_string();
             if inner.is_empty() { None } else { Some(inner) }
         } else if trimmed.starts_with("//") {
-            if !include_inline { return None; }
+            if !include_inline {
+                return None;
+            }
             let text = trimmed.trim_start_matches("//").trim().to_string();
             if text.is_empty() { None } else { Some(text) }
         } else {
-            if !include_inline { return None; }
-            let text = trimmed.trim_start_matches("/*").trim_end_matches("*/").trim().to_string();
+            if !include_inline {
+                return None;
+            }
+            let text = trimmed
+                .trim_start_matches("/*")
+                .trim_end_matches("*/")
+                .trim()
+                .to_string();
             if text.is_empty() { None } else { Some(text) }
         }
     } else if trimmed.starts_with("<#") && trimmed.ends_with("#>") {
-        let text = trimmed.trim_start_matches("<#").trim_end_matches("#>").trim().to_string();
+        let text = trimmed
+            .trim_start_matches("<#")
+            .trim_end_matches("#>")
+            .trim()
+            .to_string();
         if text.is_empty() { None } else { Some(text) }
     } else if trimmed.starts_with("--[[") && trimmed.ends_with("--]]") {
-        let text = trimmed.trim_start_matches("--[[").trim_end_matches("--]]").trim().to_string();
+        let text = trimmed
+            .trim_start_matches("--[[")
+            .trim_end_matches("--]]")
+            .trim()
+            .to_string();
         if text.is_empty() { None } else { Some(text) }
     } else if trimmed.starts_with("--") {
         let text = trimmed.trim_start_matches("--").trim().to_string();
@@ -218,7 +254,11 @@ fn strip_comment_delimiters(raw: &str, has_doc_comments: bool, include_inline: b
 
 /// Walk a Rust AST and extract doc comment text as plain segments,
 /// everything else as markup.
-fn extract_rust_docs(tree: &tree_sitter::Tree, content: &str) -> AnnotatedText {
+fn extract_rust_docs(
+    tree: &tree_sitter::Tree,
+    content: &str,
+    config: &ParserConfig,
+) -> AnnotatedText {
     let mut segments: Vec<TextSegment> = Vec::new();
     let mut cursor = tree.walk();
     let bytes = content.as_bytes();
@@ -227,58 +267,74 @@ fn extract_rust_docs(tree: &tree_sitter::Tree, content: &str) -> AnnotatedText {
         cursor: &mut tree_sitter::TreeCursor,
         bytes: &[u8],
         segments: &mut Vec<TextSegment>,
+        include_inline: bool,
     ) {
         let node = cursor.node();
         let kind = node.kind();
 
-        // line_comment or block_comment that contains outer_doc_comment_marker
-        if kind == "line_comment" || kind == "block_comment" {
-            // Check for outer_doc_comment_marker child
-            let has_doc_marker = (0..node.child_count()).any(|i| {
-                node.child(i as u32)
-                    .map(|c| c.kind() == "outer_doc_comment_marker")
-                    .unwrap_or(false)
-            });
-
-            if has_doc_marker {
-                // Extract doc_comment child text (the actual prose)
-                for i in 0..node.child_count() {
-                    if let Some(child) = node.child(i as u32).filter(|c| c.kind() == "doc_comment") {
-                        let start = child.start_byte();
-                        let text = std::str::from_utf8(&bytes[start..child.end_byte()])
-                            .unwrap_or("")
-                            .to_string();
-                        if !text.trim().is_empty() {
-                            segments.push(TextSegment {
-                                text,
-                                is_markup: false,
-                                offset: start,
-                            });
-                        }
+        if kind == "comment" || kind == "line_comment" || kind == "block_comment" {
+            let mut extracted_doc = false;
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(i as u32).filter(|c| c.kind() == "doc_comment") {
+                    let start = child.start_byte();
+                    let text = std::str::from_utf8(&bytes[start..child.end_byte()])
+                        .unwrap_or("")
+                        .to_string();
+                    if !text.trim().is_empty() {
+                        segments.push(TextSegment {
+                            text,
+                            is_markup: false,
+                            offset: start,
+                        });
                     }
+                    extracted_doc = true;
                 }
+            }
+
+            if extracted_doc {
                 return;
             }
-            // Non-doc comment → markup (skip, no segment added)
+
+            if include_inline {
+                let start = node.start_byte();
+                let raw = std::str::from_utf8(&bytes[start..node.end_byte()]).unwrap_or("");
+                if let Some((text, offset_delta)) = strip_inline_comment_with_offset(raw) {
+                    segments.push(TextSegment {
+                        text,
+                        is_markup: false,
+                        offset: start + offset_delta,
+                    });
+                }
+            }
+
             return;
         }
 
         if cursor.goto_first_child() {
-            walk(cursor, bytes, segments);
+            walk(cursor, bytes, segments, include_inline);
             while cursor.goto_next_sibling() {
-                walk(cursor, bytes, segments);
+                walk(cursor, bytes, segments, include_inline);
             }
             cursor.goto_parent();
         }
     }
 
-    walk(&mut cursor, bytes, &mut segments);
+    walk(
+        &mut cursor,
+        bytes,
+        &mut segments,
+        config.include_inline_comments,
+    );
     AnnotatedText { segments }
 }
 
 /// Walk a C# AST and extract doc comment text as plain segments.
 /// C# `comment` nodes contain the raw `/// ...` or `/** ... */` text.
-fn extract_csharp_docs(tree: &tree_sitter::Tree, content: &str) -> AnnotatedText {
+fn extract_csharp_docs(
+    tree: &tree_sitter::Tree,
+    content: &str,
+    config: &ParserConfig,
+) -> AnnotatedText {
     let mut segments: Vec<TextSegment> = Vec::new();
     let mut cursor = tree.walk();
     let bytes = content.as_bytes();
@@ -287,33 +343,84 @@ fn extract_csharp_docs(tree: &tree_sitter::Tree, content: &str) -> AnnotatedText
         cursor: &mut tree_sitter::TreeCursor,
         bytes: &[u8],
         segments: &mut Vec<TextSegment>,
+        include_inline: bool,
     ) {
         let node = cursor.node();
-        if node.kind() == "comment" {
+        if node.kind() == "comment"
+            || node.kind() == "line_comment"
+            || node.kind() == "block_comment"
+        {
             let start = node.start_byte();
             let raw = std::str::from_utf8(&bytes[start..node.end_byte()]).unwrap_or("");
-            let text = strip_csharp_doc_comment(raw);
-            if !text.is_empty() {
+            if let Some((text, offset_delta)) = extract_csharp_comment(raw, include_inline) {
                 segments.push(TextSegment {
                     text,
                     is_markup: false,
-                    offset: start,
+                    offset: start + offset_delta,
                 });
             }
             return;
         }
 
         if cursor.goto_first_child() {
-            walk(cursor, bytes, segments);
+            walk(cursor, bytes, segments, include_inline);
             while cursor.goto_next_sibling() {
-                walk(cursor, bytes, segments);
+                walk(cursor, bytes, segments, include_inline);
             }
             cursor.goto_parent();
         }
     }
 
-    walk(&mut cursor, bytes, &mut segments);
+    walk(
+        &mut cursor,
+        bytes,
+        &mut segments,
+        config.include_inline_comments,
+    );
     AnnotatedText { segments }
+}
+
+fn strip_inline_comment_with_offset(raw: &str) -> Option<(String, usize)> {
+    let trimmed = raw.trim();
+
+    if let Some(stripped) = trimmed.strip_prefix("//") {
+        let leading_ws = stripped.len() - stripped.trim_start().len();
+        let text = stripped.trim().to_string();
+        if text.is_empty() {
+            None
+        } else {
+            Some((text, 2 + leading_ws))
+        }
+    } else if trimmed.starts_with("/*") && trimmed.ends_with("*/") {
+        let text = trimmed
+            .trim_start_matches("/*")
+            .trim_end_matches("*/")
+            .trim()
+            .to_string();
+        if text.is_empty() {
+            None
+        } else {
+            Some((text, 2))
+        }
+    } else {
+        None
+    }
+}
+
+fn extract_csharp_comment(raw: &str, include_inline: bool) -> Option<(String, usize)> {
+    let trimmed = raw.trim();
+    if trimmed.starts_with("///") || trimmed.starts_with("/**") {
+        let text = strip_csharp_doc_comment(raw);
+        if text.is_empty() {
+            None
+        } else {
+            Some((text, 0))
+        }
+    } else if include_inline {
+        strip_inline_comment_with_offset(raw)
+    } else {
+        None
+    }
 }
 
 /// Strip `///` or `/** */` delimiters from a C# doc comment, returning
@@ -352,11 +459,7 @@ fn extract_html_text(tree: &tree_sitter::Tree, content: &str) -> AnnotatedText {
     let mut cursor = tree.walk();
     let bytes = content.as_bytes();
 
-    fn walk(
-        cursor: &mut tree_sitter::TreeCursor,
-        bytes: &[u8],
-        segments: &mut Vec<TextSegment>,
-    ) {
+    fn walk(cursor: &mut tree_sitter::TreeCursor, bytes: &[u8], segments: &mut Vec<TextSegment>) {
         let node = cursor.node();
         let kind = node.kind();
 
@@ -419,11 +522,15 @@ fn is_markdown_markup_kind(kind: &str) -> bool {
 ///
 /// Empty fences and unsupported languages stay skipped as markup.
 fn should_parse_fenced_code(lang: &str, code_content: &str) -> bool {
-    !code_content.is_empty() && (language_from_id(lang).is_some() || language_from_extension(lang).is_some())
+    !code_content.is_empty()
+        && (language_from_id(lang).is_some() || language_from_extension(lang).is_some())
 }
 
 /// Extracts fence language tag and raw code content from Markdown fenced block node.
-fn fenced_code_language_and_content<'a>(node: tree_sitter::Node<'a>, content: &'a str) -> (&'a str, &'a str) {
+fn fenced_code_language_and_content<'a>(
+    node: tree_sitter::Node<'a>,
+    content: &'a str,
+) -> (&'a str, &'a str) {
     let mut lang = "unknown";
     let mut code_content = "";
 
@@ -684,6 +791,37 @@ mod tests {
         assert!(!text.contains("let"), "code leaked into plain text: {text}");
     }
 
+    #[test]
+    fn test_rust_inner_doc_comment_extracted() {
+        let src = "//! Crate docs\nfn foo() {}";
+        let result = parse_document("rust", src, &ParserConfig::default());
+        assert_eq!(result.plain_text().trim(), "Crate docs");
+    }
+
+    #[test]
+    fn test_rust_inline_comments_included_when_enabled() {
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
+        let src = "// Regular comment\nfn foo() {}\n/* Block comment */";
+        let result = parse_document("rust", src, &config);
+        let text = result.plain_text();
+        assert!(text.contains("Regular comment"), "got: {text}");
+        assert!(text.contains("Block comment"), "got: {text}");
+    }
+
+    #[test]
+    fn test_rust_inline_line_comment_offset_starts_after_delimiter() {
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
+        let src = "//  Regular comment\nfn foo() {}";
+        let result = parse_document("rust", src, &config);
+        assert_eq!(result.segments.len(), 1);
+        let start = src.find("Regular comment").unwrap();
+        assert_eq!(result.segments[0].offset, start);
+    }
+
     // ── Cycle 6: C# doc comment extraction ──────────────────────────────────
 
     #[test]
@@ -732,6 +870,40 @@ mod tests {
         let text = result.plain_text();
         assert!(text.contains("Docs here"), "got: {text}");
         assert!(!text.contains("int"), "code leaked into plain text: {text}");
+    }
+
+    #[test]
+    fn test_csharp_inline_comments_included_when_enabled() {
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
+        let src = "// Regular comment\npublic void Foo() {}\n/* Block comment */";
+        let result = parse_document("csharp", src, &config);
+        let text = result.plain_text();
+        assert!(text.contains("Regular comment"), "got: {text}");
+        assert!(text.contains("Block comment"), "got: {text}");
+    }
+
+    #[test]
+    fn test_csharp_inline_line_comment_offset_starts_after_delimiter() {
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
+        let src = "//  Regular comment\npublic void Foo() {}";
+        let result = parse_document("csharp", src, &config);
+        assert_eq!(result.segments.len(), 1);
+        let start = src.find("Regular comment").unwrap();
+        assert_eq!(result.segments[0].offset, start);
+    }
+
+    #[test]
+    fn test_csharp_alias_parses_comments() {
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
+        let src = "// Alias comment\npublic void Foo() {}";
+        let result = parse_document("cs", src, &config);
+        assert!(result.plain_text().contains("Alias comment"));
     }
 
     // ── Cycle 7: HTML text extraction ───────────────────────────────────────
@@ -822,7 +994,10 @@ mod tests {
         let result = parse_document("markdown", src, &ParserConfig::default());
         let text = result.plain_text();
 
-        assert!(text.contains("localhost`.\n\nTo run LanguageTool manually"), "got: {text:?}");
+        assert!(
+            text.contains("localhost`.\n\nTo run LanguageTool manually"),
+            "got: {text:?}"
+        );
     }
 
     // ── Cycle 9: Absolute byte offset tracking ──────────────────────────────
@@ -840,9 +1015,39 @@ mod tests {
     fn test_markdown_recursive_offset_tracking() {
         let src = "# Title\n\n```rust\n/// Doc\n```";
         let result = parse_document("markdown", src, &ParserConfig::default());
-        let doc_seg = result.segments.iter().find(|s| s.text.contains("Doc")).unwrap();
+        let doc_seg = result
+            .segments
+            .iter()
+            .find(|s| s.text.contains("Doc"))
+            .unwrap();
         let expected_offset = src.find(" Doc").unwrap();
         assert_eq!(doc_seg.offset, expected_offset);
+    }
+
+    #[test]
+    fn test_markdown_fenced_code_rust_inline_recursion_when_enabled() {
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
+        let src = "# Title\n\n```rust\n// Inline comment\nfn foo() {}\n```";
+        let result = parse_document("markdown", src, &config);
+        let text = result.plain_text();
+        assert!(text.contains("Title"));
+        assert!(text.contains("Inline comment"), "got: {text}");
+        assert!(!text.contains("fn foo"), "got: {text}");
+    }
+
+    #[test]
+    fn test_markdown_fenced_code_csharp_alias_recursion_when_enabled() {
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
+        let src = "# Title\n\n```c#\n// Inline comment\npublic void Foo() {}\n```";
+        let result = parse_document("markdown", src, &config);
+        let text = result.plain_text();
+        assert!(text.contains("Title"));
+        assert!(text.contains("Inline comment"), "got: {text}");
+        assert!(!text.contains("public void Foo"), "got: {text}");
     }
 
     // ── Cycle 1: CSS comment extraction (tracer bullet) ──────────────────────
@@ -925,7 +1130,9 @@ mod tests {
 
     #[test]
     fn test_java_with_inline_comments() {
-        let config = ParserConfig { include_inline_comments: true };
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
         let src = "/** Doc */\n// Inline\nclass Foo {}";
         let result = parse_document("java", src, &config);
         let text = result.plain_text();

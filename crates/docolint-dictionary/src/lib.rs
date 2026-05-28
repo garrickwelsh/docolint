@@ -1,8 +1,8 @@
+use docolint_types::GrammarError;
 use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
-use docolint_types::GrammarError;
 
 /// Manages a set of ignored words for filtering grammar errors.
 ///
@@ -51,7 +51,7 @@ impl Dictionary {
     /// Does not panic. File read errors are silently ignored (missing files = no words).
     pub fn load(workspace_root: &Path, document_path: &Path) -> Self {
         let mut ignored_words = HashSet::new();
-        
+
         let mut current = if document_path.is_file() {
             document_path.parent()
         } else {
@@ -128,18 +128,22 @@ impl Dictionary {
     /// # Returns
     /// A new `Vec` containing only errors whose matched word is not ignored.
     pub fn filter_errors(&self, text: &str, errors: Vec<GrammarError>) -> Vec<GrammarError> {
-        errors.into_iter().filter(|error| {
-            let Some(start) = Self::char_offset_to_byte_offset(text, error.offset) else {
-                return true;
-            };
-            let Some(end) = Self::char_offset_to_byte_offset(text, error.offset + error.length) else {
-                return true;
-            };
-            let Some(word) = text.get(start..end) else {
-                return true;
-            };
-            !self.is_ignored(word)
-        }).collect()
+        errors
+            .into_iter()
+            .filter(|error| {
+                let Some(start) = Self::char_offset_to_byte_offset(text, error.offset) else {
+                    return true;
+                };
+                let Some(end) = Self::char_offset_to_byte_offset(text, error.offset + error.length)
+                else {
+                    return true;
+                };
+                let Some(word) = text.get(start..end) else {
+                    return true;
+                };
+                !self.is_ignored(word)
+            })
+            .collect()
     }
 }
 
@@ -156,15 +160,15 @@ mod tests {
         let root_path = root.path();
         let sub = root_path.join("sub");
         fs::create_dir(&sub).unwrap();
-        
+
         let mut root_ignore = File::create(root_path.join(".docolint-ignore")).unwrap();
         writeln!(root_ignore, "rootword").unwrap();
-        
+
         let mut sub_ignore = File::create(sub.join(".docolint-ignore")).unwrap();
         writeln!(sub_ignore, "subword").unwrap();
-        
+
         let dict = Dictionary::load(root_path, &sub.join("file.rs"));
-        
+
         assert!(dict.is_ignored("rootword"));
         assert!(dict.is_ignored("subword"));
         assert!(!dict.is_ignored("unknown"));
@@ -174,7 +178,7 @@ mod tests {
     fn test_is_ignored_case_insensitive() {
         let mut dict = Dictionary::new();
         dict.ignored_words.insert("word".to_string());
-        
+
         assert!(dict.is_ignored("word"));
         assert!(dict.is_ignored("WORD"));
     }
@@ -184,10 +188,10 @@ mod tests {
         let root = tempdir().unwrap();
         let root_path = root.path();
         let ignore_file = root_path.join(".docolint-ignore");
-        
+
         let mut dict = Dictionary::new();
         dict.add_word("newword", &ignore_file).unwrap();
-        
+
         assert!(ignore_file.exists());
         let content = fs::read_to_string(ignore_file).unwrap();
         assert!(content.contains("newword"));
@@ -198,7 +202,7 @@ mod tests {
     fn test_filter_errors() {
         let mut dict = Dictionary::new();
         dict.ignored_words.insert("ignored".to_string());
-        
+
         let text = "This has an ignored word and a valid word.";
         let errors = vec![
             GrammarError {
@@ -216,9 +220,9 @@ mod tests {
                 rule_id: "RULE2".to_string(),
             },
         ];
-        
+
         let filtered = dict.filter_errors(text, errors);
-        
+
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].rule_id, "RULE2");
     }

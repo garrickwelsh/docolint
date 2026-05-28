@@ -1,11 +1,12 @@
 use docolint_server::run;
 use lsp_server::{Connection, Message, Notification, Request};
-use lsp_types::{
-    DidOpenTextDocumentParams, InitializeParams, PublishDiagnosticsParams,
-};
+use lsp_types::{DidOpenTextDocumentParams, InitializeParams, PublishDiagnosticsParams};
 use serde_json::json;
 use std::time::Duration;
-use wiremock::{MockServer, Mock, ResponseTemplate, matchers::{method, path}};
+use wiremock::{
+    Mock, MockServer, ResponseTemplate,
+    matchers::{method, path},
+};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_did_open_diagnostic_flow() {
@@ -45,9 +46,7 @@ async fn test_did_open_diagnostic_flow() {
         ..Default::default()
     };
 
-    let server_handle = tokio::spawn(async move {
-        run(server_conn, params).await
-    });
+    let server_handle = tokio::spawn(async move { run(server_conn, params).await });
 
     let uri = "file:///test.rs";
     let did_open = Notification::new(
@@ -61,14 +60,19 @@ async fn test_did_open_diagnostic_flow() {
             },
         },
     );
-    client_conn.sender.send(Message::Notification(did_open)).unwrap();
+    client_conn
+        .sender
+        .send(Message::Notification(did_open))
+        .unwrap();
 
     let timeout = Duration::from_secs(5);
     let start = std::time::Instant::now();
     let mut found_diagnostic = false;
 
     while start.elapsed() < timeout {
-        if let Ok(Message::Notification(not)) = client_conn.receiver.recv_timeout(Duration::from_millis(100))
+        if let Ok(Message::Notification(not)) = client_conn
+            .receiver
+            .recv_timeout(Duration::from_millis(100))
             && not.method == "textDocument/publishDiagnostics"
         {
             let params: PublishDiagnosticsParams = serde_json::from_value(not.params).unwrap();
@@ -76,7 +80,11 @@ async fn test_did_open_diagnostic_flow() {
             let diag = &params.diagnostics[0];
             assert_eq!(diag.severity, Some(DiagnosticSeverity::INFORMATION));
             assert_eq!(diag.source.as_deref(), Some("docolint"));
-            assert!(diag.message.contains("spelling"), "message: {}", diag.message);
+            assert!(
+                diag.message.contains("spelling"),
+                "message: {}",
+                diag.message
+            );
             if let Some(lsp_types::NumberOrString::String(rule_id)) = &diag.code {
                 assert_eq!(rule_id, "MORFOLOGIK_RULE_EN_US");
             } else {
@@ -86,7 +94,9 @@ async fn test_did_open_diagnostic_flow() {
             assert!(diag.range.start.character > 0);
             let data = diag.data.as_ref().expect("diagnostic data is missing");
             assert_eq!(data["rule_id"].as_str(), Some("MORFOLOGIK_RULE_EN_US"));
-            let replacements = data["replacements"].as_array().expect("replacements should be an array");
+            let replacements = data["replacements"]
+                .as_array()
+                .expect("replacements should be an array");
             assert!(!replacements.is_empty(), "replacements should not be empty");
             assert_eq!(replacements[0].as_str(), Some("test"));
             found_diagnostic = true;
@@ -94,7 +104,10 @@ async fn test_did_open_diagnostic_flow() {
         }
     }
 
-    assert!(found_diagnostic, "Did not receive publishDiagnostics within timeout");
+    assert!(
+        found_diagnostic,
+        "Did not receive publishDiagnostics within timeout"
+    );
 
     // Clean shutdown
     let shutdown = Request::new(1.into(), "shutdown".to_string(), serde_json::Value::Null);

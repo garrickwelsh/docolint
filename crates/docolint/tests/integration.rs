@@ -1,10 +1,12 @@
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
-use std::io::{Read, Write, BufRead, BufReader};
 use std::time::{Duration, Instant};
 
 fn send_message(stdin: &mut impl Write, body: &str) {
     let msg = format!("Content-Length: {}\r\n\r\n{}", body.len(), body);
-    stdin.write_all(msg.as_bytes()).expect("Failed to write to stdin");
+    stdin
+        .write_all(msg.as_bytes())
+        .expect("Failed to write to stdin");
     stdin.flush().expect("Failed to flush stdin");
 }
 
@@ -50,7 +52,11 @@ fn test_binary_handshake() {
     send_message(&mut stdin, init_req);
 
     let resp = read_message(&mut reader).expect("No response from server");
-    assert!(resp.contains("\"result\""), "Expected initialize result, got: {}", resp);
+    assert!(
+        resp.contains("\"result\""),
+        "Expected initialize result, got: {}",
+        resp
+    );
 
     let initialized = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
     send_message(&mut stdin, initialized);
@@ -85,7 +91,11 @@ fn test_full_lsp_flow_with_lt() {
     let init_req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{},"initializationOptions":{"endpoint":"http://localhost:8081"}}}"#;
     send_message(&mut stdin, init_req);
     let resp = read_message(&mut reader).expect("No initialize response");
-    assert!(resp.contains("\"result\""), "Expected initialize result, got: {}", resp);
+    assert!(
+        resp.contains("\"result\""),
+        "Expected initialize result, got: {}",
+        resp
+    );
 
     let initialized = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
     send_message(&mut stdin, initialized);
@@ -102,16 +112,32 @@ fn test_full_lsp_flow_with_lt() {
             && body.contains("textDocument/publishDiagnostics")
         {
             let json: serde_json::Value = serde_json::from_str(&body).expect("Invalid JSON");
-            let diagnostics = json["params"]["diagnostics"].as_array().expect("diagnostics is not an array");
+            let diagnostics = json["params"]["diagnostics"]
+                .as_array()
+                .expect("diagnostics is not an array");
             assert!(!diagnostics.is_empty(), "Expected at least one diagnostic");
 
             let diag = &diagnostics[0];
-            assert!(diag["message"].as_str().is_some_and(|s| !s.is_empty()), "diagnostic message is empty");
-            assert_eq!(diag["source"].as_str(), Some("docolint"), "source is not 'docolint'");
-            assert!(diag["code"].is_string() || diag["code"].is_number(), "code is missing");
+            assert!(
+                diag["message"].as_str().is_some_and(|s| !s.is_empty()),
+                "diagnostic message is empty"
+            );
+            assert_eq!(
+                diag["source"].as_str(),
+                Some("docolint"),
+                "source is not 'docolint'"
+            );
+            assert!(
+                diag["code"].is_string() || diag["code"].is_number(),
+                "code is missing"
+            );
 
             let range = &diag["range"];
-            assert_eq!(range["start"]["line"].as_i64(), Some(0), "range start line is not 0");
+            assert_eq!(
+                range["start"]["line"].as_i64(),
+                Some(0),
+                "range start line is not 0"
+            );
 
             found_diagnostic = true;
             break;
@@ -119,7 +145,10 @@ fn test_full_lsp_flow_with_lt() {
         std::thread::sleep(Duration::from_millis(200));
     }
 
-    assert!(found_diagnostic, "Did not receive publishDiagnostics within timeout");
+    assert!(
+        found_diagnostic,
+        "Did not receive publishDiagnostics within timeout"
+    );
 
     let shutdown_req = r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#;
     send_message(&mut stdin, shutdown_req);

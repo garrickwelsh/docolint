@@ -1,15 +1,14 @@
+use docolint_client::{ClientConfig, LanguageToolClient};
+use docolint_dictionary::Dictionary;
+use docolint_parser::{ParserConfig, parse_document};
+use docolint_types::GrammarError;
 use lsp_server::{Connection, Message, Notification, Response};
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, Command, Diagnostic,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     InitializeParams, OneOf, OptionalVersionedTextDocumentIdentifier, Position,
-    PublishDiagnosticsParams, Range, ServerCapabilities, TextDocumentEdit, TextEdit,
-    WorkspaceEdit,
+    PublishDiagnosticsParams, Range, ServerCapabilities, TextDocumentEdit, TextEdit, WorkspaceEdit,
 };
-use docolint_client::{ClientConfig, LanguageToolClient};
-use docolint_dictionary::Dictionary;
-use docolint_parser::{parse_document, ParserConfig};
-use docolint_types::GrammarError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
@@ -149,18 +148,16 @@ pub fn generate_replacement_actions(
     let mut actions = Vec::new();
     for (i, replacement) in replacements.iter().enumerate() {
         let edit = WorkspaceEdit {
-            document_changes: Some(lsp_types::DocumentChanges::Edits(vec![
-                TextDocumentEdit {
-                    text_document: OptionalVersionedTextDocumentIdentifier {
-                        uri: uri.clone(),
-                        version: None,
-                    },
-                    edits: vec![OneOf::Left(TextEdit {
-                        range: diag.range,
-                        new_text: replacement.clone(),
-                    })],
+            document_changes: Some(lsp_types::DocumentChanges::Edits(vec![TextDocumentEdit {
+                text_document: OptionalVersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: None,
                 },
-            ])),
+                edits: vec![OneOf::Left(TextEdit {
+                    range: diag.range,
+                    new_text: replacement.clone(),
+                })],
+            }])),
             ..Default::default()
         };
 
@@ -421,7 +418,9 @@ struct SystemCommandRunner;
 
 impl CommandRunner for SystemCommandRunner {
     fn run(&self, runtime: ContainerRuntime, args: &[&str]) -> io::Result<CommandOutput> {
-        let output = ProcessCommand::new(runtime.command_name()).args(args).output()?;
+        let output = ProcessCommand::new(runtime.command_name())
+            .args(args)
+            .output()?;
         Ok(CommandOutput {
             success: output.status.success(),
             stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
@@ -465,11 +464,16 @@ fn is_local_endpoint(endpoint: &str) -> bool {
         Err(_) => return false,
     };
 
-    matches!(url.host_str(), Some("localhost") | Some("127.0.0.1") | Some("::1"))
+    matches!(
+        url.host_str(),
+        Some("localhost") | Some("127.0.0.1") | Some("::1")
+    )
 }
 
 fn is_docker_from_docker_mount(mountinfo: &str) -> bool {
-    mountinfo.lines().any(|line| line.contains("sock") && line.contains("docker"))
+    mountinfo
+        .lines()
+        .any(|line| line.contains("sock") && line.contains("docker"))
 }
 
 fn has_docker_from_docker_mount() -> bool {
@@ -498,7 +502,12 @@ fn inspect_container_state(
     let inspect = runner
         .run(
             runtime,
-            &["inspect", "--format", "{{.HostConfig.NetworkMode}}", LT_CONTAINER_NAME],
+            &[
+                "inspect",
+                "--format",
+                "{{.HostConfig.NetworkMode}}",
+                LT_CONTAINER_NAME,
+            ],
         )
         .ok()?;
     if !inspect.success {
@@ -672,7 +681,10 @@ fn ensure_language_tool_running_with(
     false
 }
 
-fn ensure_language_tool_running(endpoint: &str, sender: &crossbeam_channel::Sender<Message>) -> bool {
+fn ensure_language_tool_running(
+    endpoint: &str,
+    sender: &crossbeam_channel::Sender<Message>,
+) -> bool {
     let runner = SystemCommandRunner;
     ensure_language_tool_running_with(
         endpoint,
@@ -727,8 +739,8 @@ fn publish_diagnostics(
     for err in filtered {
         if let Some(abs_offset) = map_lt_offset_to_absolute(annotated, err.offset) {
             let start = offset_to_position(content, abs_offset);
-            let end_abs_offset = map_lt_offset_to_absolute(annotated, err.offset + err.length)
-                .unwrap_or(abs_offset);
+            let end_abs_offset =
+                map_lt_offset_to_absolute(annotated, err.offset + err.length).unwrap_or(abs_offset);
             let end = offset_to_position(content, end_abs_offset);
 
             diagnostics.push(Diagnostic {
@@ -746,7 +758,8 @@ fn publish_diagnostics(
         }
     }
 
-    let uri_lsp: lsp_types::Uri = serde_json::from_value(serde_json::to_value(uri).unwrap()).unwrap();
+    let uri_lsp: lsp_types::Uri =
+        serde_json::from_value(serde_json::to_value(uri).unwrap()).unwrap();
     let params = PublishDiagnosticsParams {
         uri: uri_lsp,
         diagnostics,
@@ -768,9 +781,15 @@ fn recheck_document(
             Some(c) => c.clone(),
             None => return,
         };
-        let lang = s.document_languages.get(&uri).cloned().unwrap_or_else(|| "plain".to_string());
+        let lang = s
+            .document_languages
+            .get(&uri)
+            .cloned()
+            .unwrap_or_else(|| "plain".to_string());
         let version = s.document_versions.get(&uri).copied().unwrap_or(1);
-        let config = ParserConfig { include_inline_comments: s.include_inline_comments };
+        let config = ParserConfig {
+            include_inline_comments: s.include_inline_comments,
+        };
         let annotated = parse_document(&lang, &content, &config);
         (content, annotated, version)
     };
@@ -811,7 +830,9 @@ fn spawn_check(
 
         let config = {
             let s = state_task.read().unwrap();
-            ParserConfig { include_inline_comments: s.include_inline_comments }
+            ParserConfig {
+                include_inline_comments: s.include_inline_comments,
+            }
         };
         let annotated = parse_document(&lang, &content, &config);
         let mut result = client.check(annotated.clone()).await;
@@ -892,7 +913,9 @@ fn handle_execute_command_request(
         return false;
     }
 
-    if let Ok(cmd_params) = serde_json::from_value::<lsp_types::ExecuteCommandParams>(req.params.clone()) {
+    if let Ok(cmd_params) =
+        serde_json::from_value::<lsp_types::ExecuteCommandParams>(req.params.clone())
+    {
         handle_ignore_word_command(state, sender.clone(), cmd_params);
         let resp = Response::new_ok(req.id.clone(), serde_json::Value::Null);
         let _ = sender.send(Message::Response(resp));
@@ -971,7 +994,11 @@ fn handle_code_action_request(
 ///
 /// Stores current content, version, and language in server state, then starts
 /// debounced grammar check for opened document.
-fn handle_did_open(state: Arc<RwLock<ServerState>>, sender: crossbeam_channel::Sender<Message>, params: DidOpenTextDocumentParams) {
+fn handle_did_open(
+    state: Arc<RwLock<ServerState>>,
+    sender: crossbeam_channel::Sender<Message>,
+    params: DidOpenTextDocumentParams,
+) {
     let uri = params.text_document.uri.to_string();
     let version = params.text_document.version;
     let content = params.text_document.text;
@@ -980,7 +1007,9 @@ fn handle_did_open(state: Arc<RwLock<ServerState>>, sender: crossbeam_channel::S
     {
         let mut state_w = state.write().unwrap();
         state_w.update_version(uri.clone(), version);
-        state_w.document_content.insert(uri.clone(), content.clone());
+        state_w
+            .document_content
+            .insert(uri.clone(), content.clone());
         state_w.document_languages.insert(uri.clone(), lang.clone());
     }
 
@@ -1004,7 +1033,9 @@ fn handle_did_change(
         let lang = {
             let mut state_w = state.write().unwrap();
             state_w.update_version(uri.clone(), version);
-            state_w.document_content.insert(uri.clone(), content.clone());
+            state_w
+                .document_content
+                .insert(uri.clone(), content.clone());
             state_w
                 .document_languages
                 .get(&uri)
@@ -1120,7 +1151,9 @@ pub async fn run(
             disable_spell_check: None,
         });
 
-    let endpoint = options.endpoint.unwrap_or_else(|| "http://localhost:8081".to_string());
+    let endpoint = options
+        .endpoint
+        .unwrap_or_else(|| "http://localhost:8081".to_string());
     let language = options.language.unwrap_or_else(|| "en-US".to_string());
     let stop_on_exit = options.stop_on_exit.unwrap_or(false);
     let include_inline_comments = options.include_inline_comments.unwrap_or(false);
@@ -1144,7 +1177,9 @@ pub async fn run(
     let state = Arc::new(RwLock::new(state_raw));
 
     // Ensure local/default LanguageTool is reachable before entering blocking LSP receive loop.
-    if !probe_language_tool(&endpoint) && ensure_language_tool_running(&endpoint, &connection.sender) {
+    if !probe_language_tool(&endpoint)
+        && ensure_language_tool_running(&endpoint, &connection.sender)
+    {
         state.write().unwrap().started_lt = true;
     }
 
@@ -1205,7 +1240,13 @@ mod tests {
     }
 
     impl FakeCommandRunner {
-        fn with_response(mut self, runtime: ContainerRuntime, args: &[&str], success: bool, stdout: &str) -> Self {
+        fn with_response(
+            mut self,
+            runtime: ContainerRuntime,
+            args: &[&str],
+            success: bool,
+            stdout: &str,
+        ) -> Self {
             self.responses.insert(
                 Self::key(runtime, args),
                 Ok(CommandOutput {
@@ -1218,10 +1259,8 @@ mod tests {
         }
 
         fn with_error(mut self, runtime: ContainerRuntime, args: &[&str]) -> Self {
-            self.responses.insert(
-                Self::key(runtime, args),
-                Err("command failed".to_string()),
-            );
+            self.responses
+                .insert(Self::key(runtime, args), Err("command failed".to_string()));
             self
         }
 
@@ -1293,15 +1332,35 @@ mod tests {
     #[test]
     fn test_ensure_language_tool_uses_podman_when_docker_unusable() {
         let runner = FakeCommandRunner::default()
-            .with_response(ContainerRuntime::Docker, &["--version"], true, "Docker version")
+            .with_response(
+                ContainerRuntime::Docker,
+                &["--version"],
+                true,
+                "Docker version",
+            )
             .with_response(ContainerRuntime::Docker, &["ps"], false, "")
-            .with_response(ContainerRuntime::Podman, &["--version"], true, "podman version")
+            .with_response(
+                ContainerRuntime::Podman,
+                &["--version"],
+                true,
+                "podman version",
+            )
             .with_response(ContainerRuntime::Podman, &["ps"], true, "")
             .with_error(
                 ContainerRuntime::Podman,
-                &["inspect", "--format", "{{.HostConfig.NetworkMode}}", LT_CONTAINER_NAME],
+                &[
+                    "inspect",
+                    "--format",
+                    "{{.HostConfig.NetworkMode}}",
+                    LT_CONTAINER_NAME,
+                ],
             )
-            .with_response(ContainerRuntime::Podman, &["pull", "-q", LT_DOCKER_IMAGE], true, "")
+            .with_response(
+                ContainerRuntime::Podman,
+                &["pull", "-q", LT_DOCKER_IMAGE],
+                true,
+                "",
+            )
             .with_response(
                 ContainerRuntime::Podman,
                 &[
@@ -1344,17 +1403,42 @@ mod tests {
     #[test]
     fn test_wrong_network_container_is_recreated_after_pull() {
         let runner = FakeCommandRunner::default()
-            .with_response(ContainerRuntime::Docker, &["--version"], true, "Docker version")
+            .with_response(
+                ContainerRuntime::Docker,
+                &["--version"],
+                true,
+                "Docker version",
+            )
             .with_response(ContainerRuntime::Docker, &["ps"], true, "")
             .with_response(
                 ContainerRuntime::Docker,
-                &["inspect", "--format", "{{.HostConfig.NetworkMode}}", LT_CONTAINER_NAME],
+                &[
+                    "inspect",
+                    "--format",
+                    "{{.HostConfig.NetworkMode}}",
+                    LT_CONTAINER_NAME,
+                ],
                 true,
                 "bridge",
             )
-            .with_response(ContainerRuntime::Docker, &["port", LT_CONTAINER_NAME, LT_CONTAINER_PORT], true, "")
-            .with_response(ContainerRuntime::Docker, &["pull", "-q", LT_DOCKER_IMAGE], true, "")
-            .with_response(ContainerRuntime::Docker, &["rm", "-f", LT_CONTAINER_NAME], true, "")
+            .with_response(
+                ContainerRuntime::Docker,
+                &["port", LT_CONTAINER_NAME, LT_CONTAINER_PORT],
+                true,
+                "",
+            )
+            .with_response(
+                ContainerRuntime::Docker,
+                &["pull", "-q", LT_DOCKER_IMAGE],
+                true,
+                "",
+            )
+            .with_response(
+                ContainerRuntime::Docker,
+                &["rm", "-f", LT_CONTAINER_NAME],
+                true,
+                "",
+            )
             .with_response(
                 ContainerRuntime::Docker,
                 &[
@@ -1618,16 +1702,23 @@ mod tests {
         });
         let mut state_raw = ServerState::new(client);
         let uri = "file:///tmp/test.rs".to_string();
-        state_raw.document_content.insert(uri.clone(), "/// testt".to_string());
-        state_raw.document_languages.insert(uri.clone(), "rust".to_string());
+        state_raw
+            .document_content
+            .insert(uri.clone(), "/// testt".to_string());
+        state_raw
+            .document_languages
+            .insert(uri.clone(), "rust".to_string());
         state_raw.document_versions.insert(uri.clone(), 1);
-        state_raw.document_errors.insert(uri.clone(), vec![GrammarError {
-            message: "Spelling".to_string(),
-            offset: 0,
-            length: 5,
-            replacements: vec!["test".to_string()],
-            rule_id: "SPELLING".to_string(),
-        }]);
+        state_raw.document_errors.insert(
+            uri.clone(),
+            vec![GrammarError {
+                message: "Spelling".to_string(),
+                offset: 0,
+                length: 5,
+                replacements: vec!["test".to_string()],
+                rule_id: "SPELLING".to_string(),
+            }],
+        );
 
         let state = Arc::new(RwLock::new(state_raw));
         let (sender, receiver) = crossbeam_channel::unbounded();
@@ -1664,14 +1755,23 @@ mod tests {
         });
         let mut state_raw = ServerState::new(client);
         state_raw.workspace_root = Some(PathBuf::from("/workspaces/project"));
-        let uri: lsp_types::Uri = serde_json::from_str("\"file:///workspaces/project/src/file.rs\"").unwrap();
-        state_raw.document_content.insert(uri.to_string(), "testt".to_string());
+        let uri: lsp_types::Uri =
+            serde_json::from_str("\"file:///workspaces/project/src/file.rs\"").unwrap();
+        state_raw
+            .document_content
+            .insert(uri.to_string(), "testt".to_string());
         let state = Arc::new(RwLock::new(state_raw));
 
         let diag = Diagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 5 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 5,
+                },
             },
             data: Some(json!({ "replacements": ["test"] })),
             ..Default::default()
@@ -1682,8 +1782,14 @@ mod tests {
             CodeActionParams {
                 text_document: lsp_types::TextDocumentIdentifier { uri },
                 range: Range {
-                    start: Position { line: 0, character: 0 },
-                    end: Position { line: 0, character: 5 },
+                    start: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 5,
+                    },
                 },
                 context: lsp_types::CodeActionContext {
                     diagnostics: vec![diag],
@@ -1729,8 +1835,20 @@ mod tests {
 
         let state_r = state.read().unwrap();
         assert_eq!(state_r.document_versions.get("file:///test.rs"), Some(&3));
-        assert_eq!(state_r.document_languages.get("file:///test.rs").map(String::as_str), Some("rust"));
-        assert_eq!(state_r.document_content.get("file:///test.rs").map(String::as_str), Some("/// hello"));
+        assert_eq!(
+            state_r
+                .document_languages
+                .get("file:///test.rs")
+                .map(String::as_str),
+            Some("rust")
+        );
+        assert_eq!(
+            state_r
+                .document_content
+                .get("file:///test.rs")
+                .map(String::as_str),
+            Some("/// hello")
+        );
         assert!(state_r.in_flight_tasks.contains_key("file:///test.rs"));
     }
 
@@ -1743,12 +1861,19 @@ mod tests {
         let mut state_raw = ServerState::new(client);
         let uri = "file:///test.rs".to_string();
         state_raw.document_versions.insert(uri.clone(), 1);
-        state_raw.document_languages.insert(uri.clone(), "rust".to_string());
-        state_raw.document_content.insert(uri.clone(), "/// hello".to_string());
+        state_raw
+            .document_languages
+            .insert(uri.clone(), "rust".to_string());
+        state_raw
+            .document_content
+            .insert(uri.clone(), "/// hello".to_string());
         state_raw.document_errors.insert(uri.clone(), vec![]);
-        state_raw.register_task(uri.clone(), tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        }));
+        state_raw.register_task(
+            uri.clone(),
+            tokio::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }),
+        );
         let state = Arc::new(RwLock::new(state_raw));
 
         handle_did_close(
@@ -1772,38 +1897,53 @@ mod tests {
     fn test_position_to_offset() {
         let content = "a\nbc";
         assert_eq!(
-            position_to_offset(content, Position {
-                line: 0,
-                character: 0
-            }),
+            position_to_offset(
+                content,
+                Position {
+                    line: 0,
+                    character: 0
+                }
+            ),
             0
         );
         assert_eq!(
-            position_to_offset(content, Position {
-                line: 0,
-                character: 1
-            }),
+            position_to_offset(
+                content,
+                Position {
+                    line: 0,
+                    character: 1
+                }
+            ),
             1
         );
         assert_eq!(
-            position_to_offset(content, Position {
-                line: 1,
-                character: 0
-            }),
+            position_to_offset(
+                content,
+                Position {
+                    line: 1,
+                    character: 0
+                }
+            ),
             2
         );
         assert_eq!(
-            position_to_offset(content, Position {
-                line: 1,
-                character: 1
-            }),
+            position_to_offset(
+                content,
+                Position {
+                    line: 1,
+                    character: 1
+                }
+            ),
             3
         );
         assert_eq!(
-            position_to_offset(content, Position {
-                line: 1,
-                character: 2
-            }),
+            position_to_offset(
+                content,
+                Position {
+                    line: 1,
+                    character: 2
+                }
+            ),
             4
         );
     }
