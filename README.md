@@ -17,184 +17,22 @@ Grammar checking and optional spelling checking for code comments and prose — 
 
 A running LanguageTool HTTP server. By default, `docolint` expects one at `http://localhost:8081`.
 
-If no local server is reachable and Docker or Podman is available, `docolint` will automatically start a container (`ghcr.io/garrickwelsh/languagetool`). Docker is tried first, then Podman.
+If no local server is reachable and Docker or Podman is available, `docolint` automatically starts a local `ghcr.io/garrickwelsh/languagetool` container. Docker is tried first, then Podman.
 
-When `docolint` runs inside a Docker-from-Docker devcontainer with Docker socket mounted from host, it starts LanguageTool with host networking so container shares devcontainer `localhost`. Otherwise it starts normally with `-p 8081:8081`.
+If Docker-from-Docker is detected, `docolint` automatically uses host networking so the shared LanguageTool server is reachable on `localhost`.
 
-To run LanguageTool manually in a Docker-from-Docker devcontainer:
-
-```bash
-docker run -d --network host ghcr.io/garrickwelsh/languagetool
-```
-
-To run LanguageTool manually on host, Docker-in-Docker, or other non-host-network setups:
-
-```bash
-docker run -d -p 8081:8081 ghcr.io/garrickwelsh/languagetool
-```
-
-Equivalent Podman commands work too.
+For manual container commands and advanced networking details, see [docs/LANGUAGETOOL.md](docs/LANGUAGETOOL.md).
 
 ## Installation
 
-```bash
-cargo install --path .
-```
-
-The `docolint` binary will be placed in `~/.cargo/bin`. Ensure this directory is on your `$PATH`.
+See [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Editor Configuration
 
-### Helix
+See editor-specific docs:
 
-Add to `~/.config/helix/languages.toml`:
-
-```toml
-[language-server.docolint]
-command = "docolint"
-
-[[language]]
-name = "rust"
-language-servers = ["docolint", "rust-analyzer"]
-
-[[language]]
-name = "c-sharp"
-language-servers = ["docolint"]
-
-[[language]]
-name = "html"
-language-servers = ["docolint"]
-
-[[language]]
-name = "markdown"
-language-servers = ["docolint"]
-
-[[language]]
-name = "javascript"
-language-servers = ["docolint"]
-
-[[language]]
-name = "typescript"
-language-servers = ["docolint"]
-
-[[language]]
-name = "python"
-language-servers = ["docolint"]
-
-[[language]]
-name = "json"
-language-servers = ["docolint"]
-
-[[language]]
-name = "java"
-language-servers = ["docolint"]
-
-[[language]]
-name = "bash"
-language-servers = ["docolint"]
-
-[[language]]
-name = "powershell"
-language-servers = ["docolint"]
-
-[[language]]
-name = "scss"
-language-servers = ["docolint"]
-
-[[language]]
-name = "css"
-language-servers = ["docolint"]
-
-[[language]]
-name = "lua"
-language-servers = ["docolint"]
-```
-
-To configure a custom LanguageTool endpoint:
-
-```toml
-[language-server.docolint]
-command = "docolint"
-config = { endpoint = "http://your-lt-server:8081" }
-```
-
-To configure a specific LanguageTool language and disable its dictionary spelling rule:
-
-```toml
-[language-server.docolint]
-command = "docolint"
-config = { language = "en-AU", disableSpellCheck = true }
-```
-
-#### Recommended: Codebook + docolint
-
-For best signal/noise, use [Codebook](https://github.com/blopker/codebook) for spelling and configure `docolint` for grammar and context rules only.
-
-Install `codebook-lsp` and make it available on your `$PATH`. Common options include `cargo install codebook-lsp`, `brew install codebook-lsp`, and `pacman -S codebook-lsp`. See the [Codebook installation docs](https://github.com/blopker/codebook#installation) for more.
-
-Helix example:
-
-```toml
-[language-server.docolint]
-command = "docolint"
-config = { disableSpellCheck = true }
-
-[language-server.codebook]
-command = "codebook-lsp"
-args = ["serve"]
-
-[[language]]
-name = "rust"
-language-servers = ["docolint", "codebook", "rust-analyzer"]
-
-[[language]]
-name = "markdown"
-language-servers = ["docolint", "codebook"]
-
-[[language]]
-name = "typescript"
-language-servers = ["docolint", "codebook"]
-```
-
-`docolint` defaults to doc comments and prose-oriented content. If you want grammar checking for all inline comments too, set `includeInlineComments = true` on `docolint`.
-
-### Neovim
-
-Requires Neovim 0.11+. Add to your `init.lua`:
-
-```lua
-vim.lsp.config('docolint', {
-  cmd = { 'docolint' },
-  settings = {
-    initializationOptions = {
-      endpoint = "http://localhost:8081",  -- optional, defaults to localhost:8081
-      language = "en-AU",                  -- optional, defaults to en-US
-      disableSpellCheck = true,             -- optional, keeps grammar/context rules enabled
-      stopOnExit = false,                   -- optional but currently ignored; LT container is shared
-    },
-  },
-})
-
-vim.lsp.enable('docolint')
-```
-
-Recommended paired setup with Codebook:
-
-```lua
-vim.lsp.config('docolint', {
-  cmd = { 'docolint' },
-  settings = {
-    initializationOptions = {
-      disableSpellCheck = true,
-    },
-  },
-})
-
-vim.lsp.enable('docolint')
-vim.lsp.enable('codebook')
-```
-
-`includeInlineComments = true` expands `docolint` from doc comments and prose to inline comments when you want grammar checks there too.
+- [Helix configuration](docs/HELIX.md)
+- [Neovim configuration](docs/NEOVIM.md)
 
 ### VS Code
 
@@ -202,23 +40,7 @@ VS Code support may be added in the future.
 
 ## Supported Languages
 
-| Language | Doc Comments | Inline Comments | Notes |
-|---|---|---|---|
-| Rust | ✅ `///`, `/** */` | ❌ | |
-| C# | ✅ `///`, `/** */` | ❌ | |
-| JavaScript | ✅ `/** */` | ⚙️ `//` | Configurable |
-| TypeScript | ✅ `/** */` | ⚙️ `//` | Configurable |
-| Python | ✅ `#` | | All comments |
-| Java | ✅ `/** */` | ⚙️ `//`, `/* */` | Configurable |
-| Bash | ✅ `#` | | All comments |
-| PowerShell | ✅ `#`, `<# #>` | | All comments |
-| SCSS | ✅ `/* */` | | `//` silent comments not in AST |
-| CSS | ✅ `/* */` | | All comments |
-| Lua | ✅ `--`, `--[[ ]]` | | All comments |
-| HTML | ✅ text nodes | | |
-| Markdown | ✅ prose + recursion | | |
-
-⚙️ Inline comments are controlled by the `includeInlineComments` initialization option (default: `false`).
+See [docs/SUPPORTED_LANGUAGES.md](docs/SUPPORTED_LANGUAGES.md).
 
 ## Ignoring Words
 
