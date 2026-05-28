@@ -134,3 +134,11 @@ See [docs/adr/0002-function-length-and-readability-refactor-policy.md](docs/adr/
   - Handoff: `docs/handoff/phase-8-step-5-server-notification-handlers.md`
 - [x] **Step 6 (Verify)**: Run full verification and update graph.
   - Handoff: `docs/handoff/phase-8-step-6-verification-graph.md`
+
+## Phase 9: Language-Specific Spell Check Toggle
+Focus: Let editors choose LanguageTool language and disable only that language's dictionary spelling rule.
+
+- [x] **TDD Cycle 33**: Add `language` and `disableSpellCheck` initialization options with safe defaults.
+- [x] **TDD Cycle 34**: Pass configured language through LT client requests.
+- [x] **TDD Cycle 35**: Derive and disable `MORFOLOGIK_RULE_<LANG>` when spell check is disabled.
+- [x] **TDD Cycle 36**: Update docs and glossary for grammar-first, optional spelling behavior.

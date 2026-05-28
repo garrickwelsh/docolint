@@ -38,7 +38,9 @@ async fn test_did_open_diagnostic_flow() {
 
     let params = InitializeParams {
         initialization_options: Some(json!({
-            "endpoint": mock_server.uri()
+            "endpoint": mock_server.uri(),
+            "language": "en-AU",
+            "disableSpellCheck": true
         })),
         ..Default::default()
     };

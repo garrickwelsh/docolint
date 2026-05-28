@@ -367,9 +367,12 @@ impl ServerState {
 pub struct InitializationOptions {
     /// URL of the LanguageTool server. Defaults to `http://localhost:8081` if not provided.
     pub endpoint: Option<String>,
+    /// LanguageTool language code. Defaults to `en-US` if not provided.
+    pub language: Option<String>,
     /// Retained for compatibility but ignored because LanguageTool containers are shared.
     pub stop_on_exit: Option<bool>,
     pub include_inline_comments: Option<bool>,
+    pub disable_spell_check: Option<bool>,
 }
 
 const LT_DOCKER_IMAGE: &str = "ghcr.io/garrickwelsh/languagetool";
@@ -1111,17 +1114,23 @@ pub async fn run(
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or(InitializationOptions {
             endpoint: None,
+            language: None,
             stop_on_exit: None,
             include_inline_comments: None,
+            disable_spell_check: None,
         });
 
     let endpoint = options.endpoint.unwrap_or_else(|| "http://localhost:8081".to_string());
+    let language = options.language.unwrap_or_else(|| "en-US".to_string());
     let stop_on_exit = options.stop_on_exit.unwrap_or(false);
     let include_inline_comments = options.include_inline_comments.unwrap_or(false);
+    let disable_spell_check = options.disable_spell_check.unwrap_or(false);
 
     // Build client and mutable server state shared by request/notification handlers.
     let client = LanguageToolClient::new(ClientConfig {
         base_url: endpoint.clone(),
+        language,
+        disable_spell_check,
     });
 
     let mut state_raw = ServerState::new(client);
@@ -1242,7 +1251,9 @@ mod tests {
         let (server_conn, client_conn) = Connection::memory();
         let params = InitializeParams {
             initialization_options: Some(json!({
-                "endpoint": "http://custom-lt:8081"
+                "endpoint": "http://custom-lt:8081",
+                "language": "en-AU",
+                "disableSpellCheck": true
             })),
             ..Default::default()
         };
@@ -1457,6 +1468,7 @@ mod tests {
     fn test_circuit_breaker() {
         let client = LanguageToolClient::new(ClientConfig {
             base_url: "http://localhost:8081".to_string(),
+            ..Default::default()
         });
         let mut state = ServerState::new(client);
         state.error_cooldown = Duration::from_millis(100);
@@ -1581,6 +1593,7 @@ mod tests {
     async fn test_task_cancellation() {
         let client = LanguageToolClient::new(ClientConfig {
             base_url: "http://localhost:8081".to_string(),
+            ..Default::default()
         });
         let mut state = ServerState::new(client);
         let uri = "file:///test.rs".to_string();
@@ -1601,6 +1614,7 @@ mod tests {
     fn test_handle_ignore_word_command_rechecks_document() {
         let client = LanguageToolClient::new(ClientConfig {
             base_url: "http://localhost:8081".to_string(),
+            ..Default::default()
         });
         let mut state_raw = ServerState::new(client);
         let uri = "file:///tmp/test.rs".to_string();
@@ -1646,6 +1660,7 @@ mod tests {
     fn test_collect_code_actions_includes_ignore_and_replace() {
         let client = LanguageToolClient::new(ClientConfig {
             base_url: "http://localhost:8081".to_string(),
+            ..Default::default()
         });
         let mut state_raw = ServerState::new(client);
         state_raw.workspace_root = Some(PathBuf::from("/workspaces/project"));
@@ -1694,6 +1709,7 @@ mod tests {
     async fn test_handle_did_open_stores_document_state() {
         let client = LanguageToolClient::new(ClientConfig {
             base_url: "http://localhost:8081".to_string(),
+            ..Default::default()
         });
         let state = Arc::new(RwLock::new(ServerState::new(client)));
         let (sender, _receiver) = crossbeam_channel::unbounded();
@@ -1722,6 +1738,7 @@ mod tests {
     async fn test_handle_did_close_clears_document_state() {
         let client = LanguageToolClient::new(ClientConfig {
             base_url: "http://localhost:8081".to_string(),
+            ..Default::default()
         });
         let mut state_raw = ServerState::new(client);
         let uri = "file:///test.rs".to_string();

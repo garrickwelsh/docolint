@@ -1,13 +1,13 @@
 # docolint
 
-Grammar and spelling checking for code comments and prose — powered by [LanguageTool](https://languagetool.org/) and the Language Server Protocol.
+Grammar checking and optional spelling checking for code comments and prose — powered by [LanguageTool](https://languagetool.org/) and the Language Server Protocol.
 
 `docolint` uses `tree-sitter` to extract prose from doc comments, markdown, and other text within source files, then checks it with LanguageTool. Works in Rust, C#, HTML, Markdown, JavaScript/TypeScript, Python, and more.
 
 ## Features
 
 - **AST-based extraction** — Uses `tree-sitter` to identify doc comments and prose, avoiding false positives on variable names and code
-- **Inline diagnostics** — Grammar and spelling errors appear directly in your editor
+- **Inline diagnostics** — Grammar and optional spelling errors appear directly in your editor
 - **Quick fixes** — Apply suggested replacements or ignore words with a single action
 - **Hierarchical ignore files** — `.docolint-ignore` files work like `.gitignore`, scoped from file to workspace root
 - **Zero-config** — Auto-starts a local LanguageTool container via Docker or Podman if no local server is reachable
@@ -118,6 +118,14 @@ command = "docolint"
 config = { endpoint = "http://your-lt-server:8081" }
 ```
 
+To configure a specific LanguageTool language and disable its dictionary spelling rule:
+
+```toml
+[language-server.docolint]
+command = "docolint"
+config = { language = "en-AU", disableSpellCheck = true }
+```
+
 ### Neovim
 
 Requires Neovim 0.11+. Add to your `init.lua`:
@@ -128,6 +136,8 @@ vim.lsp.config('docolint', {
   settings = {
     initializationOptions = {
       endpoint = "http://localhost:8081",  -- optional, defaults to localhost:8081
+      language = "en-AU",                  -- optional, defaults to en-US
+      disableSpellCheck = true,             -- optional, keeps grammar/context rules enabled
       stopOnExit = false,                   -- optional but currently ignored; LT container is shared
     },
   },
@@ -174,6 +184,8 @@ languagetool
 Words are matched case-insensitively. Ignore files are merged hierarchically from the current file up to the workspace root.
 
 When hovering over a grammar error, quick-fix actions let you add the offending word to a `.docolint-ignore` file at any directory level.
+
+`disableSpellCheck = true` disables LanguageTool's dictionary spelling rule for the configured language, for example `MORFOLOGIK_RULE_EN_AU`, while keeping grammar and context-sensitive rules enabled.
 
 ## Architecture
 

@@ -8,6 +8,20 @@ pub struct ClientConfig {
     /// Base URL of the LanguageTool server (e.g., `http://localhost:8081`).
     /// Do not include the `/v2/check` path; it is appended automatically.
     pub base_url: String,
+    /// LanguageTool language code (e.g., `en-US`).
+    pub language: String,
+    /// Disables the derived LanguageTool dictionary spelling rule for `language`.
+    pub disable_spell_check: bool,
+}
+
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "http://localhost:8081".to_string(),
+            language: "en-US".to_string(),
+            disable_spell_check: false,
+        }
+    }
 }
 
 /// HTTP client for communicating with the LanguageTool API.
@@ -52,24 +66,36 @@ impl LanguageToolClient {
     pub async fn check(&self, text: AnnotatedText) -> Result<Vec<GrammarError>, reqwest::Error> {
         let url = format!("{}/v2/check", self.config.base_url);
         let has_markup = text.segments.iter().any(|s| s.is_markup);
+        let spelling_rule = self
+            .config
+            .disable_spell_check
+            .then(|| spelling_rule_id(&self.config.language));
 
-        let params: Vec<(&str, String)> = if has_markup {
+        let mut params: Vec<(&str, String)> = if has_markup {
             let data = serde_json::json!({ "annotation": text.segments });
             vec![
-                ("language", "en-US".to_string()),
+                ("language", self.config.language.clone()),
                 ("data", data.to_string()),
             ]
         } else {
             vec![
-                ("language", "en-US".to_string()),
+                ("language", self.config.language.clone()),
                 ("text", text.plain_text()),
             ]
         };
+
+        if let Some(rule) = spelling_rule {
+            params.push(("disabledRules", rule));
+        }
 
         let resp = self.client.post(&url).form(&params).send().await?;
         let lt_resp: LTCheckResponse = resp.json().await?;
         Ok(lt_resp.matches.into_iter().map(GrammarError::from).collect())
     }
+}
+
+fn spelling_rule_id(language: &str) -> String {
+    format!("MORFOLOGIK_RULE_{}", language.replace('-', "_").to_uppercase())
 }
 
 #[derive(Deserialize)]
@@ -112,12 +138,13 @@ impl From<LTMatch> for GrammarError {
 mod tests {
     use super::*;
     use wiremock::{Mock, MockServer, ResponseTemplate};
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{body_string_contains, method, path};
 
     #[test]
     fn test_new_with_localhost() {
         let config = ClientConfig {
             base_url: "http://localhost:8081".to_string(),
+            ..Default::default()
         };
         let client = LanguageToolClient::new(config);
         assert_eq!(client.base_url(), "http://localhost:8081");
@@ -127,9 +154,16 @@ mod tests {
     fn test_new_with_cloud_url() {
         let config = ClientConfig {
             base_url: "https://api.languagetoolplus.com".to_string(),
+            ..Default::default()
         };
         let client = LanguageToolClient::new(config);
         assert_eq!(client.base_url(), "https://api.languagetoolplus.com");
+    }
+
+    #[test]
+    fn test_spelling_rule_id_uses_language() {
+        assert_eq!(spelling_rule_id("en-US"), "MORFOLOGIK_RULE_EN_US");
+        assert_eq!(spelling_rule_id("en-AU"), "MORFOLOGIK_RULE_EN_AU");
     }
 
     #[tokio::test]
@@ -159,12 +193,14 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v2/check"))
+            .and(body_string_contains("language=en-US"))
             .respond_with(ResponseTemplate::new(200).set_body_json(&sample_response))
             .mount(&mock_server)
             .await;
 
         let config = ClientConfig {
             base_url: mock_server.uri(),
+            ..Default::default()
         };
         let client = LanguageToolClient::new(config);
         let text = AnnotatedText::from("some tezt with a agrammatical isue.");
@@ -196,12 +232,16 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v2/check"))
+            .and(body_string_contains("language=en-AU"))
+            .and(body_string_contains("disabledRules=MORFOLOGIK_RULE_EN_AU"))
             .respond_with(ResponseTemplate::new(200).set_body_json(&sample_response))
             .mount(&mock_server)
             .await;
 
         let config = ClientConfig {
             base_url: mock_server.uri(),
+            language: "en-AU".to_string(),
+            disable_spell_check: true,
         };
         let client = LanguageToolClient::new(config);
 
@@ -221,6 +261,53 @@ mod tests {
         assert_eq!(errors[0].offset, 6);
         assert_eq!(errors[0].length, 5);
         assert_eq!(errors[0].replacements, vec!["world"]);
+    }
+
+    #[tokio::test]
+    async fn test_check_uses_configured_language() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v2/check"))
+            .and(body_string_contains("language=en-AU"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "matches": []
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = LanguageToolClient::new(ClientConfig {
+            base_url: mock_server.uri(),
+            language: "en-AU".to_string(),
+            ..Default::default()
+        });
+
+        let errors = client.check(AnnotatedText::from("colour")).await.unwrap();
+        assert!(errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_check_disables_derived_spelling_rule() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v2/check"))
+            .and(body_string_contains("language=en-AU"))
+            .and(body_string_contains("disabledRules=MORFOLOGIK_RULE_EN_AU"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "matches": []
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = LanguageToolClient::new(ClientConfig {
+            base_url: mock_server.uri(),
+            language: "en-AU".to_string(),
+            disable_spell_check: true,
+        });
+
+        let errors = client.check(AnnotatedText::from("colour")).await.unwrap();
+        assert!(errors.is_empty());
     }
 
     #[test]
