@@ -1,6 +1,6 @@
 [package]
 name = "docolint-client"
-version = "0.1.3"
+version = "0.1.4"
 edition.workspace = true
 description = "HTTP client for the LanguageTool API"
 license.workspace = true
@@ -10,7 +10,7 @@ categories = ["development-tools"]
 keywords = ["lsp", "languagetool", "http-client"]
 
 [dependencies]
-docolint-types = { path = "../docolint-types", version = "0.1.3" }
+docolint-types = { path = "../docolint-types", version = "0.1.4" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
