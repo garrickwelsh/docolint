@@ -126,6 +126,38 @@ command = "docolint"
 config = { language = "en-AU", disableSpellCheck = true }
 ```
 
+#### Recommended: Codebook + docolint
+
+For best signal/noise, use [Codebook](https://github.com/blopker/codebook) for spelling and configure `docolint` for grammar and context rules only.
+
+Install `codebook-lsp` and make it available on your `$PATH`. Common options include `cargo install codebook-lsp`, `brew install codebook-lsp`, and `pacman -S codebook-lsp`. See the [Codebook installation docs](https://github.com/blopker/codebook#installation) for more.
+
+Helix example:
+
+```toml
+[language-server.docolint]
+command = "docolint"
+config = { disableSpellCheck = true }
+
+[language-server.codebook]
+command = "codebook-lsp"
+args = ["serve"]
+
+[[language]]
+name = "rust"
+language-servers = ["docolint", "codebook", "rust-analyzer"]
+
+[[language]]
+name = "markdown"
+language-servers = ["docolint", "codebook"]
+
+[[language]]
+name = "typescript"
+language-servers = ["docolint", "codebook"]
+```
+
+`docolint` defaults to doc comments and prose-oriented content. If you want grammar checking for all inline comments too, set `includeInlineComments = true` on `docolint`.
+
 ### Neovim
 
 Requires Neovim 0.11+. Add to your `init.lua`:
@@ -145,6 +177,24 @@ vim.lsp.config('docolint', {
 
 vim.lsp.enable('docolint')
 ```
+
+Recommended paired setup with Codebook:
+
+```lua
+vim.lsp.config('docolint', {
+  cmd = { 'docolint' },
+  settings = {
+    initializationOptions = {
+      disableSpellCheck = true,
+    },
+  },
+})
+
+vim.lsp.enable('docolint')
+vim.lsp.enable('codebook')
+```
+
+`includeInlineComments = true` expands `docolint` from doc comments and prose to inline comments when you want grammar checks there too.
 
 ### VS Code
 
