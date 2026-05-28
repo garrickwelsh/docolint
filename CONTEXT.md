@@ -1,6 +1,6 @@
 # Context: docolint
 
-A Language Server Protocol (LSP) implementation in Rust that integrates LanguageTool to provide grammar checking and optional spelling checking for documentation and comments.
+`docolint` is Rust LSP server for grammar checking and optional spelling checking in documentation and comments.
 
 ## Glossary
 

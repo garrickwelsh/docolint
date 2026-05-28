@@ -1,0 +1,35 @@
+# Architecture
+
+## Purpose
+
+Provide local ignore-word filtering based on hierarchical `.docolint-ignore` files.
+
+## Public API
+
+- `Dictionary::new()`: empty dictionary.
+- `Dictionary::load()`: merge ignore files from document path to workspace root.
+- `Dictionary::is_ignored()`: case-insensitive membership check.
+- `Dictionary::add_word()`: append word to target ignore file.
+- `Dictionary::filter_errors()`: remove ignored `GrammarError` matches from result set.
+
+## Internal Map
+
+- Hierarchical load: walk upward from document location to workspace root.
+- Normalization: lowercase stored words for case-insensitive matching.
+- Offset translation: convert character offsets to byte offsets before slicing checked text.
+
+## Key Flows
+
+- File open/change -> load merged ignore set for current document.
+- Ignore-word action -> append to chosen file -> keep in-memory set aligned.
+- Grammar result filter -> drop matches whose text resolves to ignored words.
+
+## Tests
+
+- In-module tests cover hierarchical merging, case-insensitive matching, file creation, filtering, Unicode-safe offsets.
+
+## Update When
+
+- `.docolint-ignore` lookup rules change.
+- Filtering behavior or normalization changes.
+- Ignore file write behavior changes.

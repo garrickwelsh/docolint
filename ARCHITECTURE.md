@@ -1,54 +1,50 @@
 # Architecture
 
-## 1. Overview
-`docolint` is a Language Server Protocol (LSP) implementation that provides grammar and spelling checking by extracting prose from source code and sending it to a LanguageTool server. It is split into modular crates for separation of concerns.
+`docolint` is Rust Cargo workspace for extracting prose from source files, checking it with LanguageTool, mapping results back into LSP diagnostics.
 
-## 2. Architecture & Flows
+## Read Next
 
-The core execution flow is driven by LSP lifecycle events (e.g., `didChange`):
+- `CONTEXT.md`: domain vocabulary.
+- `docs/STANDARDS.md`: coding, naming, testing expectations.
+- `docs/README.md`: supplemental guides and ADR index.
+- `.github/workflows/`: release and automation flow.
+- `crates/<crate>/ARCHITECTURE.md`: crate-local maps.
 
-```mermaid
-sequenceDiagram
-    participant Editor
-    participant Server as docolint-server
-    participant Parser as docolint-parser
-    participant Client as docolint-client
-    participant Dict as docolint-dictionary
-    participant LT as LanguageTool HTTP
+## Workspace Map
 
-    Editor->>Server: didChange (File content)
-    Server->>Parser: Extract prose (content, lang_id)
-    Parser-->>Server: AnnotatedText (prose segments + offsets)
-    Server->>Client: Validate(AnnotatedText)
-    Client->>LT: HTTP /v2/check
-    LT-->>Client: Raw Grammar Matches
-    Client-->>Server: GrammarError types
-    Server->>Dict: Filter ignored words (.docolint-ignore)
-    Dict-->>Server: Filtered Errors
-    Server->>Server: Map segments back to original offsets
-    Server->>Editor: PublishDiagnostics
-```
+- `crates/docolint`: binary entrypoint.
+- `crates/docolint-server`: LSP runtime, diagnostics, code actions, container recovery.
+- `crates/docolint-parser`: `tree-sitter` extraction and recursive Markdown parsing.
+- `crates/docolint-client`: LanguageTool HTTP client.
+- `crates/docolint-dictionary`: `.docolint-ignore` loading and filtering.
+- `crates/docolint-types`: shared types for extracted text and grammar errors.
 
-## 3. Modules
+## Main Flow
 
-*   **`docolint-types`**: Core domain types shared across the workspace (`GrammarError`, `TextSegment`, `AnnotatedText`).
-*   **`docolint-parser`**: Prose extraction engine. Uses `tree-sitter` to parse various languages and extract doc comments/prose while ignoring source code.
-*   **`docolint-client`**: HTTP client wrapping `reqwest`. Communicates with LanguageTool `/v2/check` API and deserializes responses.
-*   **`docolint-dictionary`**: Manages a hierarchical, local dictionary. Merges `.docolint-ignore` files from the current file up to the workspace root to filter out valid project-specific terminology.
-*   **`docolint-server`**: Core LSP implementation. Manages server state, coordinates document processing, handles offset mapping, and processes `CodeAction` requests (quick fixes).
-*   **`docolint`**: Executable entry point. Sets up stdio connection with the editor and starts the async `docolint-server` runtime.
+1. Editor sends document content to `docolint-server`.
+2. Server calls `docolint-parser` to extract `AnnotatedText`.
+3. Server sends extracted prose to `docolint-client`.
+4. Client calls LanguageTool, returns `GrammarError` values.
+5. Server filters ignored words via `docolint-dictionary`.
+6. Server maps offsets back into source ranges, publishes diagnostics and code actions.
 
-## 4. Design Choices & Trade-offs
+## Automation
 
-*   **AST-Based Extraction (`tree-sitter`) vs. Regex**: 
-    *   *Choice*: Use `tree-sitter` to explicitly identify comments and prose.
-    *   *Trade-off*: Increases binary size and build time due to multiple C-based grammars, but drastically reduces false positives (e.g., ignoring variable names).
-*   **Annotated Text Segmentation**: 
-    *   *Choice*: Isolate raw source logic from HTTP logic using `AnnotatedText`.
-    *   *Trade-off*: Adds intermediate object overhead, but allows marking segments as `is_markup` so LanguageTool can ignore internal formatting (like Markdown bold tags) without breaking offset mapping.
-*   **Auto-Provisioned Infrastructure Fallback**: 
-*   *Choice*: If local LanguageTool HTTP API is unreachable, `docolint-server` attempts to auto-start shared local `ghcr.io/garrickwelsh/languagetool` container, trying Docker first then Podman. Docker-from-Docker environments use host networking; other environments publish port `8081:8081`.
-*   *Trade-off*: Provides zero-config local recovery across devcontainers and hosts without forcing Docker-specific behavior. Shared container lifecycle means `stopOnExit` cannot safely stop the service per editor instance.
-*   **Aggressive Modularization**: 
-    *   *Choice*: Split logic into distinct `docolint-*` crates.
-    *   *Trade-off*: Requires managing a Cargo workspace, but enforces strict boundaries and enables isolated testing.
+- `.github/workflows/release.yml`: tag-driven release pipeline for `v*` tags.
+- Builds release artifacts for Linux, macOS, and Windows targets.
+- Publishes GitHub Release assets, then publishes workspace crates to crates.io.
+
+## Crate Index
+
+- [`crates/docolint/ARCHITECTURE.md`](crates/docolint/ARCHITECTURE.md)
+- [`crates/docolint-server/ARCHITECTURE.md`](crates/docolint-server/ARCHITECTURE.md)
+- [`crates/docolint-parser/ARCHITECTURE.md`](crates/docolint-parser/ARCHITECTURE.md)
+- [`crates/docolint-client/ARCHITECTURE.md`](crates/docolint-client/ARCHITECTURE.md)
+- [`crates/docolint-dictionary/ARCHITECTURE.md`](crates/docolint-dictionary/ARCHITECTURE.md)
+- [`crates/docolint-types/ARCHITECTURE.md`](crates/docolint-types/ARCHITECTURE.md)
+
+## Design Notes
+
+- AST-first extraction over regex: see `crates/docolint-parser/ARCHITECTURE.md` and `docs/adr/0001-extended-language-support.md`.
+- Readability refactor policy: see `docs/adr/0002-function-length-and-readability-refactor-policy.md`.
+- Container startup and recovery: see `docs/adr/0003-container-runtime-startup-and-recovery.md`.
