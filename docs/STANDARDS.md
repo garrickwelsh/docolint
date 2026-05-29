@@ -7,6 +7,10 @@ Shared repo standards. Keep brief. Do not repeat crate-local structure here.
 - Prefer small public APIs. Keep helpers private unless reuse needs wider visibility.
 - Split code by cohesive responsibility, not arbitrary line counts.
 - Functions over 100 lines require readability review. Functions over 150 lines are strong refactor candidates.
+- Files over 500 lines require cohesion/readability review, especially when size hurts AI context effectiveness.
+- Files over 800 lines are strong split candidates.
+- Split files by cohesive responsibility and stable seams, not arbitrary line counts.
+- Large test modules may exceed these thresholds when keeping behavior examples together improves locality.
 - Prefer direct code over clever abstractions. Introduce abstraction only when shared behavior is real.
 - Preserve exact LanguageTool and LSP terms where code crosses those boundaries.
 
