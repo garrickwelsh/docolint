@@ -574,19 +574,22 @@ mod tests {
     }
 
     #[test]
-    fn test_csharp_doc_comment_offset_stays_at_comment_start() {
+    fn test_csharp_doc_comment_offset_starts_at_retained_prose() {
         let src = "/// Hello world\npublic void Foo() {}";
         let result = parse_document("csharp", src, &ParserConfig::default());
         assert_eq!(result.segments.len(), 1);
-        assert_eq!(result.segments[0].offset, src.find("///").unwrap());
+        assert_eq!(result.segments[0].offset, src.find("Hello world").unwrap());
     }
 
     #[test]
-    fn test_csharp_block_doc_comment_offset_stays_at_comment_start() {
+    fn test_csharp_block_doc_comment_offset_starts_at_retained_prose() {
         let src = "/** Block doc comment */\npublic void Foo() {}";
         let result = parse_document("csharp", src, &ParserConfig::default());
         assert_eq!(result.segments.len(), 1);
-        assert_eq!(result.segments[0].offset, src.find("/**").unwrap());
+        assert_eq!(
+            result.segments[0].offset,
+            src.find("Block doc comment").unwrap()
+        );
     }
 
     // ── Cycle 7: HTML text extraction ───────────────────────────────────────
@@ -837,12 +840,12 @@ mod tests {
     }
 
     #[test]
-    fn test_java_doc_comment_offset_stays_at_comment_start() {
+    fn test_java_doc_comment_offset_starts_at_retained_prose() {
         let config = ParserConfig::default();
         let src = "/** Doc comment */\nclass Foo {}";
         let result = parse_document("java", src, &config);
         assert_eq!(result.segments.len(), 1);
-        assert_eq!(result.segments[0].offset, src.find("/**").unwrap());
+        assert_eq!(result.segments[0].offset, src.find("Doc comment").unwrap());
     }
 
     // ── Cycle 8: Java inline comments when enabled ───────────────────────────
@@ -872,12 +875,12 @@ mod tests {
     }
 
     #[test]
-    fn test_js_doc_comment_offset_stays_at_comment_start() {
+    fn test_js_doc_comment_offset_starts_at_retained_prose() {
         let config = ParserConfig::default();
         let src = "/** Doc */\nconst x = 1;";
         let result = parse_document("javascript", src, &config);
         assert_eq!(result.segments.len(), 1);
-        assert_eq!(result.segments[0].offset, src.find("/**").unwrap());
+        assert_eq!(result.segments[0].offset, src.find("Doc").unwrap());
     }
 
     // ── Cycle 11: Markdown recursion with new language ───────────────────────

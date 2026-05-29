@@ -170,14 +170,14 @@ Focus: Split comment extraction by cohesive responsibility, preserve Stage 1 beh
   - Handoff: `docs/handoff/phase-10-step-2-parser-shared-comment-walker.md`
 - [x] **Step 3 (Verify)**: Run targeted parser verification for Stage 1 and stop for manual review/commit.
   - Handoff: `docs/handoff/phase-10-step-3-parser-stage-1-verification.md`
-- [ ] **Step 4 (Red)**: Add offset-invariant tests for C# and generic doc-comment extractors.
+- [x] **Step 4 (Red)**: Add offset-invariant tests for C# and generic doc-comment extractors.
   - Handoff: `docs/handoff/phase-10-step-4-parser-offset-invariant-tests.md`
-- [ ] **Step 5 (Green/Refactor)**: Improve C# and generic doc-comment offset precision toward the retained-prose invariant without XML-aware parsing.
+- [x] **Step 5 (Green/Refactor)**: Improve C# and generic doc-comment offset precision toward the retained-prose invariant without XML-aware parsing.
   - Handoff: `docs/handoff/phase-10-step-5-parser-offset-precision-implementation.md`
-- [ ] **Step 6 (Verify)**: Run Stage 2 verification and stop for manual review/commit.
+- [x] **Step 6 (Verify)**: Run Stage 2 verification and stop for manual review/commit.
   - Handoff: `docs/handoff/phase-10-step-6-parser-stage-2-verification.md`
 
 ### Stage 2 Follow-ups
 
-- [ ] Improve stripped block comment offset mapping so diagnostics can start at exact prose position after leading `*` prefixes, not coarse post-delimiter offsets.
-- [ ] Improve C# doc comment offset mapping so stripped `///` and XML doc content map diagnostics to exact prose positions.
+- [ ] Improve joined multi-line block comment offset mapping beyond the first retained prose byte so diagnostics inside later lines can map more precisely.
+- [ ] Improve C# XML doc comment offset mapping so stripped XML doc content maps diagnostics to exact prose positions.

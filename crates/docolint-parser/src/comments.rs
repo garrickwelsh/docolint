@@ -78,6 +78,63 @@ pub(super) fn strip_inline_comment_with_offset(raw: &str) -> Option<(String, usi
     }
 }
 
+pub(super) fn strip_triple_slash_doc_comment_with_offset(raw: &str) -> Option<(String, usize)> {
+    let mut text_parts = Vec::new();
+    let mut first_offset = None;
+    let mut running_offset = 0;
+
+    for line in raw.lines() {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        let Some(stripped) = trimmed.strip_prefix("///") else {
+            running_offset += line.len() + 1;
+            continue;
+        };
+
+        let leading_ws = stripped.len() - stripped.trim_start().len();
+        let prose = stripped.trim();
+        if !prose.is_empty() {
+            first_offset.get_or_insert(running_offset + indent + 3 + leading_ws);
+            text_parts.push(prose.to_string());
+        }
+
+        running_offset += line.len() + 1;
+    }
+
+    let text = text_parts.join(" ");
+    first_offset.map(|offset| (text, offset))
+}
+
+pub(super) fn strip_doc_block_comment_with_offset(raw: &str) -> Option<(String, usize)> {
+    let inner = raw.strip_prefix("/**")?.strip_suffix("*/")?;
+    let mut text_parts = Vec::new();
+    let mut first_offset = None;
+    let mut running_offset = 3;
+
+    for line in inner.lines() {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        let without_star = trimmed.strip_prefix('*').unwrap_or(trimmed);
+        let star_delta = usize::from(trimmed.starts_with('*'));
+        let leading_ws = without_star.len() - without_star.trim_start().len();
+        let prose = without_star.trim();
+
+        if !prose.is_empty() {
+            first_offset.get_or_insert(running_offset + indent + star_delta + leading_ws);
+            text_parts.push(prose.to_string());
+        }
+
+        running_offset += line.len() + 1;
+    }
+
+    let text = text_parts.join(" ").trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some((text, first_offset.unwrap_or(3)))
+    }
+}
+
 fn is_comment_kind(kind: &str) -> bool {
     matches!(kind, "comment" | "line_comment" | "block_comment")
 }
