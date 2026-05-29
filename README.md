@@ -1,3 +1,5 @@
+![docolint logo](LOGO.png)
+
 # docolint
 
 Grammar checking and optional spelling checking for code comments and prose — powered by [LanguageTool](https://languagetool.org/) and the Language Server Protocol.
