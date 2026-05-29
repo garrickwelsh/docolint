@@ -269,8 +269,8 @@ pub struct ServerState {
     pub document_content: HashMap<String, String>,
     /// Maps document URIs to their LSP language IDs.
     pub document_languages: HashMap<String, String>,
-    /// Maps document URIs to their latest raw grammar errors (pre-dictionary filter).
-    pub document_errors: HashMap<String, Vec<GrammarError>>,
+    /// Maps document URIs to their latest mapped diagnostics before dictionary re-filtering.
+    pub document_diagnostics: HashMap<String, Vec<Diagnostic>>,
     /// Maps document URIs to their in-flight async check task handles.
     /// Used for cancellation when a document changes before the previous check completes.
     pub in_flight_tasks: HashMap<String, JoinHandle<()>>,
@@ -300,7 +300,7 @@ impl ServerState {
             document_versions: HashMap::new(),
             document_content: HashMap::new(),
             document_languages: HashMap::new(),
-            document_errors: HashMap::new(),
+            document_diagnostics: HashMap::new(),
             in_flight_tasks: HashMap::new(),
             last_error_time: None,
             error_cooldown: Duration::from_secs(60),
@@ -719,44 +719,108 @@ fn load_dictionary(state: &ServerState, uri: &str) -> Dictionary {
     Dictionary::load(root, &path)
 }
 
+fn group_segments_by_unit(annotated: &AnnotatedText) -> Vec<AnnotatedText> {
+    let mut grouped: Vec<(usize, Vec<docolint_types::TextSegment>)> = Vec::new();
+
+    for segment in &annotated.segments {
+        if let Some((_, segments)) = grouped
+            .iter_mut()
+            .find(|(unit_id, _)| *unit_id == segment.unit_id)
+        {
+            segments.push(segment.clone());
+        } else {
+            grouped.push((segment.unit_id, vec![segment.clone()]));
+        }
+    }
+
+    grouped
+        .into_iter()
+        .map(|(_, segments)| AnnotatedText { segments })
+        .collect()
+}
+
+fn grammar_error_to_diagnostic(
+    content: &str,
+    annotated: &AnnotatedText,
+    err: GrammarError,
+) -> Option<Diagnostic> {
+    let abs_offset = map_lt_offset_to_absolute(annotated, err.offset)?;
+    let start = offset_to_position(content, abs_offset);
+    let end_abs_offset =
+        map_lt_offset_to_absolute(annotated, err.offset + err.length).unwrap_or(abs_offset);
+    let end = offset_to_position(content, end_abs_offset);
+
+    Some(Diagnostic {
+        range: Range { start, end },
+        severity: Some(lsp_types::DiagnosticSeverity::INFORMATION),
+        code: Some(lsp_types::NumberOrString::String(err.rule_id.clone())),
+        source: Some("docolint".to_string()),
+        message: err.message,
+        data: Some(serde_json::json!({
+            "rule_id": err.rule_id,
+            "replacements": err.replacements
+        })),
+        ..Default::default()
+    })
+}
+
+fn filter_diagnostics_for_dictionary(
+    dict: &Dictionary,
+    content: &str,
+    diagnostics: Vec<Diagnostic>,
+) -> Vec<Diagnostic> {
+    diagnostics
+        .into_iter()
+        .filter(|diag| {
+            let start = position_to_offset(content, diag.range.start);
+            let end = position_to_offset(content, diag.range.end);
+            let Some(word) = content.get(start..end) else {
+                return true;
+            };
+            !dict.is_ignored(word)
+        })
+        .collect()
+}
+
+async fn check_units(
+    client: &LanguageToolClient,
+    annotated: &AnnotatedText,
+    content: &str,
+    dict: &Dictionary,
+) -> Result<Vec<Diagnostic>, ()> {
+    let mut diagnostics = Vec::new();
+
+    for unit in group_segments_by_unit(annotated) {
+        if !unit.segments.iter().any(|segment| !segment.is_markup) {
+            continue;
+        }
+
+        let errors = client.check(unit.clone()).await.map_err(|_| ())?;
+        let filtered = dict.filter_errors(&unit.plain_text(), errors);
+        diagnostics.extend(
+            filtered
+                .into_iter()
+                .filter_map(|err| grammar_error_to_diagnostic(content, &unit, err)),
+        );
+    }
+
+    Ok(diagnostics)
+}
+
 fn publish_diagnostics(
     state: &ServerState,
     sender: &crossbeam_channel::Sender<Message>,
     uri: &str,
     version: i32,
     content: &str,
-    annotated: &AnnotatedText,
 ) {
-    let raw_errors = match state.document_errors.get(uri) {
-        Some(e) => e.clone(),
+    let diagnostics = match state.document_diagnostics.get(uri) {
+        Some(diagnostics) => diagnostics.clone(),
         None => return,
     };
 
     let dict = load_dictionary(state, uri);
-    let filtered = dict.filter_errors(&annotated.plain_text(), raw_errors);
-    let mut diagnostics = Vec::new();
-
-    for err in filtered {
-        if let Some(abs_offset) = map_lt_offset_to_absolute(annotated, err.offset) {
-            let start = offset_to_position(content, abs_offset);
-            let end_abs_offset =
-                map_lt_offset_to_absolute(annotated, err.offset + err.length).unwrap_or(abs_offset);
-            let end = offset_to_position(content, end_abs_offset);
-
-            diagnostics.push(Diagnostic {
-                range: Range { start, end },
-                severity: Some(lsp_types::DiagnosticSeverity::INFORMATION),
-                code: Some(lsp_types::NumberOrString::String(err.rule_id.clone())),
-                source: Some("docolint".to_string()),
-                message: err.message,
-                data: Some(serde_json::json!({
-                    "rule_id": err.rule_id,
-                    "replacements": err.replacements
-                })),
-                ..Default::default()
-            });
-        }
-    }
+    let diagnostics = filter_diagnostics_for_dictionary(&dict, content, diagnostics);
 
     let uri_lsp: lsp_types::Uri =
         serde_json::from_value(serde_json::to_value(uri).unwrap()).unwrap();
@@ -775,33 +839,17 @@ fn recheck_document(
     sender: crossbeam_channel::Sender<Message>,
     uri: String,
 ) {
-    let (content, annotated, version) = {
+    let (content, version) = {
         let s = state.read().unwrap();
         let content = match s.document_content.get(&uri) {
             Some(c) => c.clone(),
             None => return,
         };
-        let lang = s
-            .document_languages
-            .get(&uri)
-            .cloned()
-            .unwrap_or_else(|| "plain".to_string());
         let version = s.document_versions.get(&uri).copied().unwrap_or(1);
-        let config = ParserConfig {
-            include_inline_comments: s.include_inline_comments,
-        };
-        let annotated = parse_document(&lang, &content, &config);
-        (content, annotated, version)
+        (content, version)
     };
 
-    publish_diagnostics(
-        &state.read().unwrap(),
-        &sender,
-        &uri,
-        version,
-        &content,
-        &annotated,
-    );
+    publish_diagnostics(&state.read().unwrap(), &sender, &uri, version, &content);
 }
 
 fn spawn_check(
@@ -835,18 +883,22 @@ fn spawn_check(
             }
         };
         let annotated = parse_document(&lang, &content, &config);
-        let mut result = client.check(annotated.clone()).await;
+        let dict = {
+            let s = state_task.read().unwrap();
+            load_dictionary(&s, &uri_task)
+        };
+        let mut result = check_units(&client, &annotated, &content, &dict).await;
         if result.is_err() && recover_language_tool(client.base_url(), &sender_task) {
-            result = client.check(annotated.clone()).await;
+            result = check_units(&client, &annotated, &content, &dict).await;
         }
 
         match result {
-            Ok(errors) => {
+            Ok(diagnostics) => {
                 state_task
                     .write()
                     .unwrap()
-                    .document_errors
-                    .insert(uri_task.clone(), errors.clone());
+                    .document_diagnostics
+                    .insert(uri_task.clone(), diagnostics);
 
                 publish_diagnostics(
                     &state_task.read().unwrap(),
@@ -854,7 +906,6 @@ fn spawn_check(
                     &uri_task,
                     version,
                     &content,
-                    &annotated,
                 );
             }
             Err(_) => {
@@ -1057,7 +1108,7 @@ fn handle_did_close(state: Arc<RwLock<ServerState>>, params: DidCloseTextDocumen
     state_w.document_versions.remove(&uri);
     state_w.document_content.remove(&uri);
     state_w.document_languages.remove(&uri);
-    state_w.document_errors.remove(&uri);
+    state_w.document_diagnostics.remove(&uri);
 }
 
 /// Routes LSP notifications to document lifecycle handlers.
@@ -1487,16 +1538,19 @@ mod tests {
                     text: "Hello ".to_string(),
                     is_markup: false,
                     offset: 0,
+                    unit_id: 0,
                 },
                 TextSegment {
                     text: "<b>".to_string(),
                     is_markup: true,
                     offset: 6,
+                    unit_id: 1,
                 },
                 TextSegment {
                     text: "world".to_string(),
                     is_markup: false,
                     offset: 9,
+                    unit_id: 2,
                 },
             ],
         };
@@ -1508,6 +1562,168 @@ mod tests {
     }
 
     #[test]
+    fn test_group_segments_by_unit_keeps_code_gapped_comments_separate() {
+        use docolint_types::TextSegment;
+
+        let annotated = AnnotatedText {
+            segments: vec![
+                TextSegment {
+                    text: "first comment".to_string(),
+                    is_markup: false,
+                    offset: 3,
+                    unit_id: 1,
+                },
+                TextSegment {
+                    text: "\nlet x = 1;\n".to_string(),
+                    is_markup: true,
+                    offset: 19,
+                    unit_id: 99,
+                },
+                TextSegment {
+                    text: "second comment".to_string(),
+                    is_markup: false,
+                    offset: 32,
+                    unit_id: 2,
+                },
+            ],
+        };
+
+        let units = group_segments_by_unit(&annotated);
+
+        assert_eq!(units.len(), 3);
+        assert_eq!(units[0].plain_text(), "first comment");
+        assert_eq!(units[1].plain_text(), "");
+        assert_eq!(units[2].plain_text(), "second comment");
+    }
+
+    #[tokio::test]
+    async fn test_check_units_calls_language_tool_once_per_unit() {
+        use docolint_types::TextSegment;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let annotated = AnnotatedText {
+            segments: vec![
+                TextSegment {
+                    text: "alpha tezt".to_string(),
+                    is_markup: false,
+                    offset: 4,
+                    unit_id: 1,
+                },
+                TextSegment {
+                    text: "\nlet x = 1;\n".to_string(),
+                    is_markup: true,
+                    offset: 14,
+                    unit_id: 9,
+                },
+                TextSegment {
+                    text: "beta tezt".to_string(),
+                    is_markup: false,
+                    offset: 30,
+                    unit_id: 2,
+                },
+            ],
+        };
+        let content = "/// alpha tezt\nlet x = 1;\n/// beta tezt";
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v2/check"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "matches": [] })))
+            .expect(2)
+            .mount(&mock_server)
+            .await;
+
+        let client = LanguageToolClient::new(ClientConfig {
+            base_url: mock_server.uri(),
+            ..Default::default()
+        });
+
+        let diagnostics = check_units(&client, &annotated, content, &Dictionary::new())
+            .await
+            .unwrap();
+        let requests = mock_server.received_requests().await.unwrap();
+        let request_bodies: Vec<String> = requests
+            .iter()
+            .map(|request| String::from_utf8_lossy(&request.body).into_owned())
+            .collect();
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(request_bodies.len(), 2);
+        assert!(
+            request_bodies
+                .iter()
+                .any(|body| body.contains("alpha+tezt"))
+        );
+        assert!(request_bodies.iter().any(|body| body.contains("beta+tezt")));
+        assert!(
+            request_bodies
+                .iter()
+                .all(|body| !body.contains("alpha+tezt%0Alet+x%3D1%3B%0Abeta+tezt"))
+        );
+    }
+
+    #[test]
+    fn test_check_units_maps_offsets_per_unit() {
+        use docolint_types::TextSegment;
+
+        let annotated = AnnotatedText {
+            segments: vec![
+                TextSegment {
+                    text: "alpha tezt".to_string(),
+                    is_markup: false,
+                    offset: 4,
+                    unit_id: 1,
+                },
+                TextSegment {
+                    text: "\nlet x = 1;\n".to_string(),
+                    is_markup: true,
+                    offset: 14,
+                    unit_id: 9,
+                },
+                TextSegment {
+                    text: "beta tezt".to_string(),
+                    is_markup: false,
+                    offset: 30,
+                    unit_id: 2,
+                },
+            ],
+        };
+        let content = "/// alpha tezt\nlet x = 1;\n/// beta tezt";
+
+        let grouped = group_segments_by_unit(&annotated);
+        let first = grammar_error_to_diagnostic(
+            content,
+            &grouped[0],
+            GrammarError {
+                message: "Spelling".to_string(),
+                offset: 6,
+                length: 4,
+                replacements: vec!["text".to_string()],
+                rule_id: "RULE1".to_string(),
+            },
+        )
+        .unwrap();
+        let second = grammar_error_to_diagnostic(
+            content,
+            &grouped[2],
+            GrammarError {
+                message: "Spelling".to_string(),
+                offset: 5,
+                length: 4,
+                replacements: vec!["text".to_string()],
+                rule_id: "RULE2".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(first.range.start.line, 0);
+        assert_eq!(first.range.start.character, 10);
+        assert_eq!(second.range.start.line, 2);
+        assert_eq!(second.range.start.character, 9);
+    }
+
+    #[test]
     fn test_offset_mapping_handles_unicode() {
         use docolint_types::TextSegment;
         let text = AnnotatedText {
@@ -1515,6 +1731,7 @@ mod tests {
                 text: "alpha ❌ beta".to_string(),
                 is_markup: false,
                 offset: 0,
+                unit_id: 0,
             }],
         };
 
@@ -1709,14 +1926,22 @@ mod tests {
             .document_languages
             .insert(uri.clone(), "rust".to_string());
         state_raw.document_versions.insert(uri.clone(), 1);
-        state_raw.document_errors.insert(
+        state_raw.document_diagnostics.insert(
             uri.clone(),
-            vec![GrammarError {
+            vec![Diagnostic {
+                range: Range {
+                    start: Position {
+                        line: 0,
+                        character: 4,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 9,
+                    },
+                },
                 message: "Spelling".to_string(),
-                offset: 0,
-                length: 5,
-                replacements: vec!["test".to_string()],
-                rule_id: "SPELLING".to_string(),
+                data: Some(json!({ "replacements": ["test"] })),
+                ..Default::default()
             }],
         );
 
@@ -1867,7 +2092,7 @@ mod tests {
         state_raw
             .document_content
             .insert(uri.clone(), "/// hello".to_string());
-        state_raw.document_errors.insert(uri.clone(), vec![]);
+        state_raw.document_diagnostics.insert(uri.clone(), vec![]);
         state_raw.register_task(
             uri.clone(),
             tokio::spawn(async move {
@@ -1889,7 +2114,7 @@ mod tests {
         assert!(!state_r.document_versions.contains_key(&uri));
         assert!(!state_r.document_languages.contains_key(&uri));
         assert!(!state_r.document_content.contains_key(&uri));
-        assert!(!state_r.document_errors.contains_key(&uri));
+        assert!(!state_r.document_diagnostics.contains_key(&uri));
         assert!(!state_r.in_flight_tasks.contains_key(&uri));
     }
 

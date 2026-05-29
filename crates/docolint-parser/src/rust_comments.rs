@@ -1,5 +1,8 @@
 use crate::ParserConfig;
-use crate::comments::{extract_comment_segments, push_segment, strip_inline_comment_with_offset};
+use crate::comments::{
+    extract_comment_segments, push_segment, strip_doc_block_comment_with_offset,
+    strip_inline_comment_with_offset, strip_rust_doc_comment_with_offset,
+};
 use docolint_types::AnnotatedText;
 
 /// Walk a Rust AST and extract doc comment text as plain segments,
@@ -8,29 +11,51 @@ pub(super) fn extract_rust_docs(
     tree: &tree_sitter::Tree,
     content: &str,
     config: &ParserConfig,
+    next_unit_id: &mut usize,
 ) -> AnnotatedText {
-    let bytes = content.as_bytes();
+    let mut last_doc_comment_row = None;
+    let mut last_doc_unit_id = None;
 
-    extract_comment_segments(tree, content, |node, raw, segments| {
-        let mut extracted_doc = false;
-        for i in 0..node.child_count() {
-            if let Some(child) = node.child(i as u32).filter(|c| c.kind() == "doc_comment") {
-                let start = child.start_byte();
-                let text = std::str::from_utf8(&bytes[start..child.end_byte()])
-                    .unwrap_or("")
-                    .to_string();
-                push_segment(segments, text, start);
-                extracted_doc = true;
+    extract_comment_segments(
+        tree,
+        content,
+        next_unit_id,
+        |node, raw, segments, unit_id| {
+            let start = node.start_byte();
+            if let Some((text, offset_delta)) = strip_rust_doc_comment_with_offset(raw) {
+                let current_row = node.start_position().row;
+                let shared_unit_id = last_doc_comment_row
+                    .filter(|last_row| *last_row + 1 == current_row)
+                    .and(last_doc_unit_id);
+                let unit_id = if let Some(shared_unit_id) = shared_unit_id {
+                    if let Some(last_segment) = segments.last_mut() {
+                        if !last_segment.text.ends_with(char::is_whitespace) {
+                            last_segment.text.push(' ');
+                        }
+                    }
+                    shared_unit_id
+                } else {
+                    unit_id
+                };
+
+                push_segment(segments, text, start + offset_delta, unit_id);
+                last_doc_comment_row = Some(current_row);
+                last_doc_unit_id = Some(unit_id);
+                return;
             }
-        }
 
-        if extracted_doc || !config.include_inline_comments {
-            return;
-        }
+            if let Some((text, offset_delta)) = strip_doc_block_comment_with_offset(raw) {
+                push_segment(segments, text, start + offset_delta, unit_id);
+                return;
+            }
 
-        let start = node.start_byte();
-        if let Some((text, offset_delta)) = strip_inline_comment_with_offset(raw) {
-            push_segment(segments, text, start + offset_delta);
-        }
-    })
+            if !config.include_inline_comments {
+                return;
+            }
+
+            if let Some((text, offset_delta)) = strip_inline_comment_with_offset(raw) {
+                push_segment(segments, text, start + offset_delta, unit_id);
+            }
+        },
+    )
 }

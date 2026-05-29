@@ -13,20 +13,20 @@
 ## Workspace Map
 
 - `crates/docolint`: binary entrypoint.
-- `crates/docolint-server`: LSP runtime, diagnostics, code actions, container recovery.
-- `crates/docolint-parser`: `tree-sitter` extraction and recursive Markdown parsing.
+- `crates/docolint-server`: LSP runtime, per-unit LanguageTool orchestration, cached diagnostics, code actions, container recovery.
+- `crates/docolint-parser`: `tree-sitter` extraction, parser-assigned check units, recursive Markdown parsing.
 - `crates/docolint-client`: LanguageTool HTTP client.
 - `crates/docolint-dictionary`: `.docolint-ignore` loading and filtering.
-- `crates/docolint-types`: shared types for extracted text and grammar errors.
+- `crates/docolint-types`: shared types for extracted text, `unit_id` metadata, and grammar errors.
 
 ## Main Flow
 
 1. Editor sends document content to `docolint-server`.
-2. Server calls `docolint-parser` to extract `AnnotatedText`.
-3. Server sends extracted prose to `docolint-client`.
-4. Client calls LanguageTool, returns `GrammarError` values.
-5. Server filters ignored words via `docolint-dictionary`.
-6. Server maps offsets back into source ranges, publishes diagnostics and code actions.
+2. Server calls `docolint-parser` to extract `AnnotatedText` with parser-assigned `unit_id` values for logical prose blocks.
+3. Server groups segments by `unit_id` and sends one check unit at a time to `docolint-client`.
+4. Client calls LanguageTool, returns `GrammarError` values per unit.
+5. Server filters ignored words via `docolint-dictionary`, maps unit-local offsets back into source ranges, and caches built LSP diagnostics.
+6. Server republishes cached diagnostics on document and dictionary changes, then serves diagnostics and code actions.
 
 ## Automation
 

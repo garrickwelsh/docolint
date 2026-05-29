@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Core LSP runtime. Coordinates parsing, LanguageTool calls, dictionary filtering, diagnostic mapping, code actions, container recovery.
+Core LSP runtime. Coordinates parsing, per-unit LanguageTool calls, dictionary filtering, diagnostic caching, code actions, container recovery.
 
 ## Public API
 
@@ -15,25 +15,27 @@ Core LSP runtime. Coordinates parsing, LanguageTool calls, dictionary filtering,
 
 ## Internal Map
 
-- Server state: open documents, versions, languages, cached tasks, cooldown state.
+- Server state: open documents, versions, languages, cached diagnostics, cached tasks, cooldown state.
 - Request handling: `initialize`, `shutdown`, code actions, execute command flow.
 - Notification handling: open/change/close lifecycle and recheck scheduling.
-- Diagnostics: map `GrammarError` values into LSP `Diagnostic` payloads.
+- Per-unit checking: group parser output by `unit_id` and send one LanguageTool request per check unit.
+- Diagnostics: map unit-local `GrammarError` values into LSP `Diagnostic` payloads early, then republish cached diagnostics through dictionary filtering.
 - Recovery: local LanguageTool reachability checks and container startup fallback.
 
 ## Key Flows
 
-- Document event -> parse -> check -> dictionary filter -> offset mapping -> publish diagnostics.
+- Document event -> parse -> group by `unit_id` -> check each unit -> dictionary filter -> map/cache diagnostics -> publish diagnostics.
 - Diagnostic request -> replacement and ignore-word code actions.
+- Dictionary change -> reload ignore words -> re-filter cached diagnostics -> republish.
 - LanguageTool failure -> circuit breaker cooldown -> retry after window expires.
 
 ## Tests
 
-- In-module unit tests for mapping, actions, state helpers, recovery behavior.
+- In-module unit tests for per-unit grouping, offset mapping, actions, state helpers, recovery behavior.
 - `tests/integration.rs`: in-memory LSP flow with mocked LanguageTool.
 
 ## Update When
 
 - LSP flow, server state, or code action behavior changes.
-- Parser/client/dictionary orchestration changes.
+- Parser/client/dictionary orchestration or diagnostic caching behavior changes.
 - Container recovery or cooldown behavior changes.

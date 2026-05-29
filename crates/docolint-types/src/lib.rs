@@ -38,6 +38,11 @@ pub struct TextSegment {
     /// Skipped during serialization (`#[serde(skip)]`) as it is internal-only.
     #[serde(skip)]
     pub offset: usize,
+    /// LanguageTool check unit identifier for grouping related prose segments.
+    ///
+    /// Skipped during serialization (`#[serde(skip)]`) as it is internal-only.
+    #[serde(skip)]
+    pub unit_id: usize,
 }
 
 /// A collection of [`TextSegment`]s representing extracted prose from a source file.
@@ -58,6 +63,7 @@ impl From<&str> for AnnotatedText {
                 text: text.to_string(),
                 is_markup: false,
                 offset: 0,
+                unit_id: 0,
             }],
         }
     }
@@ -74,5 +80,27 @@ impl AnnotatedText {
             .filter(|s| !s.is_markup)
             .map(|s| s.text.as_str())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TextSegment;
+
+    #[test]
+    fn text_segment_skips_internal_metadata_in_serde() {
+        let segment = TextSegment {
+            text: "Hello".to_string(),
+            is_markup: false,
+            offset: 12,
+            unit_id: 34,
+        };
+
+        let value = serde_json::to_value(&segment).unwrap();
+
+        assert_eq!(
+            value,
+            serde_json::json!({ "text": "Hello", "markup": false })
+        );
     }
 }

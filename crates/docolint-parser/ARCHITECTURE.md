@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Extract checkable prose from source files with `tree-sitter`. Preserve offsets so diagnostics can map back into original content.
+Extract checkable prose from source files with `tree-sitter`. Preserve offsets and assign logical prose `unit_id` values so diagnostics map back into original content and checking stays scoped to one prose block.
 
 ## Public API
 
@@ -12,18 +12,18 @@ Extract checkable prose from source files with `tree-sitter`. Preserve offsets s
 ## Internal Map
 
 - Language resolution: map LSP language IDs and file extensions to grammars.
-- Comment extraction dispatch: `lib.rs` keeps public entrypoints and routes to private extractors.
-- Shared comment traversal: `comments.rs` walks Tree-sitter comment nodes and centralizes shared segment helpers.
+- Comment extraction dispatch: `lib.rs` keeps public entrypoints, owns the document-local `next_unit_id` counter, and routes to private extractors.
+- Shared comment traversal: `comments.rs` walks Tree-sitter comment nodes, reuses `unit_id` values across whitespace-adjacent stacked comments, splits code-gapped comments, and centralizes shared segment helpers.
 - Language-specific comment classifiers: `rust_comments.rs`, `csharp.rs`, and `generic_comments.rs` preserve language-family extraction rules.
 - Markup extraction: HTML text nodes and Markdown prose.
-- Recursive parsing: fenced Markdown code blocks parsed with nested language grammars.
-- Offset tracking: Rust doc comments and C#/generic doc-comment extractors anchor offsets at the first retained prose byte when possible; joined multi-line block comments still keep coarse intra-segment mapping.
+- Recursive parsing: fenced Markdown code blocks parsed with nested language grammars while reusing the same document-local `next_unit_id` stream.
+- Offset tracking: Rust doc comments and C#/generic doc-comment extractors anchor offsets at the first retained prose byte when possible; joined multi-line block comments emit one prose segment per retained line so later-line diagnostics map to later retained prose bytes while `plain_text()` stays concatenated.
 
 ## Key Flows
 
-- Known language -> parse AST -> extract prose segments -> mark non-prose as markup where needed.
-- Markdown -> split prose and code fences -> recurse into fenced language when supported.
-- Unknown language -> fall back to plain text.
+- Known language -> parse AST -> extract prose segments -> assign `unit_id` values conservatively -> mark non-prose as markup where needed.
+- Markdown -> split prose and code fences -> recurse into fenced language when supported without resetting unit numbering.
+- Unknown language -> fall back to one plain-text segment with one fresh `unit_id`.
 
 ## Tests
 
@@ -32,5 +32,5 @@ Extract checkable prose from source files with `tree-sitter`. Preserve offsets s
 ## Update When
 
 - Supported language set changes.
-- Extraction rules or recursive Markdown behavior changes.
+- Extraction rules, check-unit grouping, or recursive Markdown behavior changes.
 - Offset preservation behavior changes.

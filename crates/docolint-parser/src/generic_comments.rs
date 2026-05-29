@@ -1,6 +1,8 @@
 use crate::ParserConfig;
 use crate::comments::{
-    extract_comment_segments, push_segment, strip_doc_block_comment_with_offset,
+    extract_comment_segments, push_retained_comment_lines, push_segment,
+    retained_doc_block_comment_lines, retained_plain_block_comment_lines,
+    strip_doc_block_comment_with_offset,
 };
 use docolint_types::AnnotatedText;
 
@@ -17,19 +19,39 @@ pub(super) fn extract_comment_docs(
     content: &str,
     language_id: &str,
     config: &ParserConfig,
+    next_unit_id: &mut usize,
 ) -> AnnotatedText {
     let has_doc_comments = matches!(
         language_id,
         "javascript" | "js" | "typescript" | "ts" | "tsx" | "java"
     );
 
-    extract_comment_segments(tree, content, |node, raw, segments| {
-        if let Some((text, offset_delta)) =
-            strip_comment_delimiters(raw, has_doc_comments, config.include_inline_comments)
-        {
-            push_segment(segments, text, node.start_byte() + offset_delta);
-        }
-    })
+    extract_comment_segments(
+        tree,
+        content,
+        next_unit_id,
+        |node, raw, segments, unit_id| {
+            if raw.contains('\n') {
+                if has_doc_comments && raw.trim_start().starts_with("/**") {
+                    if let Some(lines) = retained_doc_block_comment_lines(raw) {
+                        push_retained_comment_lines(segments, node.start_byte(), lines, unit_id);
+                        return;
+                    }
+                } else if !has_doc_comments && raw.trim_start().starts_with("/*") {
+                    if let Some(lines) = retained_plain_block_comment_lines(raw) {
+                        push_retained_comment_lines(segments, node.start_byte(), lines, unit_id);
+                        return;
+                    }
+                }
+            }
+
+            if let Some((text, offset_delta)) =
+                strip_comment_delimiters(raw, has_doc_comments, config.include_inline_comments)
+            {
+                push_segment(segments, text, node.start_byte() + offset_delta, unit_id);
+            }
+        },
+    )
 }
 
 /// Strip comment delimiters from raw comment text.

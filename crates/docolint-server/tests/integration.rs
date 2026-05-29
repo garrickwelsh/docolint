@@ -117,3 +117,548 @@ async fn test_did_open_diagnostic_flow() {
     drop(client_conn);
     let _ = server_handle.await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_stacked_inline_comments_check_as_one_unit() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v2/check"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "software": { "name": "LanguageTool", "version": "6.5" },
+            "warnings": {},
+            "language": { "name": "English (US)", "code": "en-US", "detectedLanguage": "en-US" },
+            "matches": []
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let (server_conn, client_conn) = Connection::memory();
+
+    let params = InitializeParams {
+        initialization_options: Some(json!({
+            "endpoint": mock_server.uri(),
+            "includeInlineComments": true
+        })),
+        ..Default::default()
+    };
+
+    let server_handle = tokio::spawn(async move { run(server_conn, params).await });
+
+    let uri = "file:///test.rs";
+    let did_open = Notification::new(
+        "textDocument/didOpen".to_string(),
+        DidOpenTextDocumentParams {
+            text_document: lsp_types::TextDocumentItem {
+                uri: serde_json::from_str(&format!("\"{}\"", uri)).unwrap(),
+                language_id: "rust".to_string(),
+                version: 1,
+                text: "// This is the start of a sentence,\n// this continues the sentence.\nconst S: &str = \"some string\";".to_string(),
+            },
+        },
+    );
+    client_conn
+        .sender
+        .send(Message::Notification(did_open))
+        .unwrap();
+
+    let timeout = Duration::from_secs(5);
+    let start = std::time::Instant::now();
+    let mut saw_publish = false;
+
+    while start.elapsed() < timeout {
+        if let Ok(Message::Notification(not)) = client_conn
+            .receiver
+            .recv_timeout(Duration::from_millis(100))
+            && not.method == "textDocument/publishDiagnostics"
+        {
+            let params: PublishDiagnosticsParams = serde_json::from_value(not.params).unwrap();
+            assert!(
+                params.diagnostics.is_empty(),
+                "got diagnostics: {:?}",
+                params.diagnostics
+            );
+            saw_publish = true;
+            break;
+        }
+    }
+
+    assert!(
+        saw_publish,
+        "Did not receive publishDiagnostics within timeout"
+    );
+
+    let requests = mock_server.received_requests().await.unwrap();
+    assert_eq!(
+        requests.len(),
+        1,
+        "expected one LT request, got {requests:#?}"
+    );
+    let body = String::from_utf8_lossy(&requests[0].body);
+    assert!(
+        body.contains("text=This+is+the+start+of+a+sentence%2C+this+continues+the+sentence."),
+        "unexpected LT request body: {body}"
+    );
+
+    let shutdown = Request::new(1.into(), "shutdown".to_string(), serde_json::Value::Null);
+    client_conn.sender.send(Message::Request(shutdown)).unwrap();
+    let _ = client_conn.receiver.recv_timeout(Duration::from_secs(2));
+
+    drop(client_conn);
+    let _ = server_handle.await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_stacked_rust_doc_comments_check_as_one_unit() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v2/check"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "software": { "name": "LanguageTool", "version": "6.5" },
+            "warnings": {},
+            "language": { "name": "English (US)", "code": "en-US", "detectedLanguage": "en-US" },
+            "matches": []
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let (server_conn, client_conn) = Connection::memory();
+
+    let params = InitializeParams {
+        initialization_options: Some(json!({
+            "endpoint": mock_server.uri()
+        })),
+        ..Default::default()
+    };
+
+    let server_handle = tokio::spawn(async move { run(server_conn, params).await });
+
+    let uri = "file:///test.rs";
+    let did_open = Notification::new(
+        "textDocument/didOpen".to_string(),
+        DidOpenTextDocumentParams {
+            text_document: lsp_types::TextDocumentItem {
+                uri: serde_json::from_str(&format!("\"{}\"", uri)).unwrap(),
+                language_id: "rust".to_string(),
+                version: 1,
+                text: "/// This is the start of a sentence,\n/// this continues the sentence.\nfn foo() {}".to_string(),
+            },
+        },
+    );
+    client_conn
+        .sender
+        .send(Message::Notification(did_open))
+        .unwrap();
+
+    let timeout = Duration::from_secs(5);
+    let start = std::time::Instant::now();
+    let mut saw_publish = false;
+
+    while start.elapsed() < timeout {
+        if let Ok(Message::Notification(not)) = client_conn
+            .receiver
+            .recv_timeout(Duration::from_millis(100))
+            && not.method == "textDocument/publishDiagnostics"
+        {
+            let params: PublishDiagnosticsParams = serde_json::from_value(not.params).unwrap();
+            assert!(
+                params.diagnostics.is_empty(),
+                "got diagnostics: {:?}",
+                params.diagnostics
+            );
+            saw_publish = true;
+            break;
+        }
+    }
+
+    assert!(
+        saw_publish,
+        "Did not receive publishDiagnostics within timeout"
+    );
+
+    let requests = mock_server.received_requests().await.unwrap();
+    assert_eq!(
+        requests.len(),
+        1,
+        "expected one LT request, got {requests:#?}"
+    );
+    let body = String::from_utf8_lossy(&requests[0].body);
+    assert!(
+        body.contains("text=This+is+the+start+of+a+sentence%2C+this+continues+the+sentence."),
+        "unexpected LT request body: {body}"
+    );
+
+    let shutdown = Request::new(1.into(), "shutdown".to_string(), serde_json::Value::Null);
+    client_conn.sender.send(Message::Request(shutdown)).unwrap();
+    let _ = client_conn.receiver.recv_timeout(Duration::from_secs(2));
+
+    drop(client_conn);
+    let _ = server_handle.await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_stacked_csharp_doc_comments_check_as_one_unit() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v2/check"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "software": { "name": "LanguageTool", "version": "6.5" },
+            "warnings": {},
+            "language": { "name": "English (US)", "code": "en-US", "detectedLanguage": "en-US" },
+            "matches": []
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let (server_conn, client_conn) = Connection::memory();
+
+    let params = InitializeParams {
+        initialization_options: Some(json!({
+            "endpoint": mock_server.uri()
+        })),
+        ..Default::default()
+    };
+
+    let server_handle = tokio::spawn(async move { run(server_conn, params).await });
+
+    let uri = "file:///test.cs";
+    let did_open = Notification::new(
+        "textDocument/didOpen".to_string(),
+        DidOpenTextDocumentParams {
+            text_document: lsp_types::TextDocumentItem {
+                uri: serde_json::from_str(&format!("\"{}\"", uri)).unwrap(),
+                language_id: "csharp".to_string(),
+                version: 1,
+                text: "/// This is the start of a sentence,\n/// this continues the sentence.\npublic class Foo {}".to_string(),
+            },
+        },
+    );
+    client_conn
+        .sender
+        .send(Message::Notification(did_open))
+        .unwrap();
+
+    let timeout = Duration::from_secs(5);
+    let start = std::time::Instant::now();
+    let mut saw_publish = false;
+
+    while start.elapsed() < timeout {
+        if let Ok(Message::Notification(not)) = client_conn
+            .receiver
+            .recv_timeout(Duration::from_millis(100))
+            && not.method == "textDocument/publishDiagnostics"
+        {
+            let params: PublishDiagnosticsParams = serde_json::from_value(not.params).unwrap();
+            assert!(
+                params.diagnostics.is_empty(),
+                "got diagnostics: {:?}",
+                params.diagnostics
+            );
+            saw_publish = true;
+            break;
+        }
+    }
+
+    assert!(
+        saw_publish,
+        "Did not receive publishDiagnostics within timeout"
+    );
+
+    let requests = mock_server.received_requests().await.unwrap();
+    assert_eq!(
+        requests.len(),
+        1,
+        "expected one LT request, got {requests:#?}"
+    );
+    let body = String::from_utf8_lossy(&requests[0].body);
+    assert!(
+        body.contains("text=This+is+the+start+of+a+sentence%2C+this+continues+the+sentence."),
+        "unexpected LT request body: {body}"
+    );
+
+    let shutdown = Request::new(1.into(), "shutdown".to_string(), serde_json::Value::Null);
+    client_conn.sender.send(Message::Request(shutdown)).unwrap();
+    let _ = client_conn.receiver.recv_timeout(Duration::from_secs(2));
+
+    drop(client_conn);
+    let _ = server_handle.await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_rust_doc_paragraph_continuation_stays_in_one_unit() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v2/check"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "software": { "name": "LanguageTool", "version": "6.5" },
+            "warnings": {},
+            "language": { "name": "English (US)", "code": "en-US", "detectedLanguage": "en-US" },
+            "matches": []
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let (server_conn, client_conn) = Connection::memory();
+
+    let params = InitializeParams {
+        initialization_options: Some(json!({
+            "endpoint": mock_server.uri()
+        })),
+        ..Default::default()
+    };
+
+    let server_handle = tokio::spawn(async move { run(server_conn, params).await });
+
+    let uri = "file:///test.rs";
+    let did_open = Notification::new(
+        "textDocument/didOpen".to_string(),
+        DidOpenTextDocumentParams {
+            text_document: lsp_types::TextDocumentItem {
+                uri: serde_json::from_str(&format!("\"{}\"", uri)).unwrap(),
+                language_id: "rust".to_string(),
+                version: 1,
+                text: "/// Represents a single grammar or spelling error returned by LanguageTool.\n///\n/// This struct maps directly from the LanguageTool API response and is used\n/// internally to track error location, message, and suggested replacements.\npub struct GrammarError;".to_string(),
+            },
+        },
+    );
+    client_conn
+        .sender
+        .send(Message::Notification(did_open))
+        .unwrap();
+
+    let timeout = Duration::from_secs(5);
+    let start = std::time::Instant::now();
+    let mut saw_publish = false;
+
+    while start.elapsed() < timeout {
+        if let Ok(Message::Notification(not)) = client_conn
+            .receiver
+            .recv_timeout(Duration::from_millis(100))
+            && not.method == "textDocument/publishDiagnostics"
+        {
+            let params: PublishDiagnosticsParams = serde_json::from_value(not.params).unwrap();
+            assert!(
+                params.diagnostics.is_empty(),
+                "got diagnostics: {:?}",
+                params.diagnostics
+            );
+            saw_publish = true;
+            break;
+        }
+    }
+
+    assert!(
+        saw_publish,
+        "Did not receive publishDiagnostics within timeout"
+    );
+
+    let requests = mock_server.received_requests().await.unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "expected two LT requests, got {requests:#?}"
+    );
+    let bodies = requests
+        .iter()
+        .map(|request| String::from_utf8_lossy(&request.body).into_owned())
+        .collect::<Vec<_>>();
+    assert!(
+        bodies.iter().any(|body| body.contains(
+            "text=Represents+a+single+grammar+or+spelling+error+returned+by+LanguageTool."
+        )),
+        "missing first paragraph request: {bodies:#?}"
+    );
+    assert!(
+        bodies.iter().any(|body| body.contains("text=This+struct+maps+directly+from+the+LanguageTool+API+response+and+is+used+internally+to+track+error+location%2C+message%2C+and+suggested+replacements.")),
+        "missing joined continuation request: {bodies:#?}"
+    );
+
+    let shutdown = Request::new(1.into(), "shutdown".to_string(), serde_json::Value::Null);
+    client_conn.sender.send(Message::Request(shutdown)).unwrap();
+    let _ = client_conn.receiver.recv_timeout(Duration::from_secs(2));
+
+    drop(client_conn);
+    let _ = server_handle.await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_markdown_paragraph_with_inline_code_checks_as_one_unit() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v2/check"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "software": { "name": "LanguageTool", "version": "6.5" },
+            "warnings": {},
+            "language": { "name": "English (US)", "code": "en-US", "detectedLanguage": "en-US" },
+            "matches": []
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let (server_conn, client_conn) = Connection::memory();
+
+    let params = InitializeParams {
+        initialization_options: Some(json!({
+            "endpoint": mock_server.uri()
+        })),
+        ..Default::default()
+    };
+
+    let server_handle = tokio::spawn(async move { run(server_conn, params).await });
+
+    let uri = "file:///README.md";
+    let did_open = Notification::new(
+        "textDocument/didOpen".to_string(),
+        DidOpenTextDocumentParams {
+            text_document: lsp_types::TextDocumentItem {
+                uri: serde_json::from_str(&format!("\"{}\"", uri)).unwrap(),
+                language_id: "markdown".to_string(),
+                version: 1,
+                text: "`docolint` uses `tree-sitter` to extract prose from doc comments, markdown, and other text within source files, then checks it with LanguageTool. Works in Rust, C#, HTML, Markdown, JavaScript/TypeScript, Python, and more.".to_string(),
+            },
+        },
+    );
+    client_conn
+        .sender
+        .send(Message::Notification(did_open))
+        .unwrap();
+
+    let timeout = Duration::from_secs(5);
+    let start = std::time::Instant::now();
+    let mut saw_publish = false;
+
+    while start.elapsed() < timeout {
+        if let Ok(Message::Notification(not)) = client_conn
+            .receiver
+            .recv_timeout(Duration::from_millis(100))
+            && not.method == "textDocument/publishDiagnostics"
+        {
+            let params: PublishDiagnosticsParams = serde_json::from_value(not.params).unwrap();
+            assert!(
+                params.diagnostics.is_empty(),
+                "got diagnostics: {:?}",
+                params.diagnostics
+            );
+            saw_publish = true;
+            break;
+        }
+    }
+
+    assert!(
+        saw_publish,
+        "Did not receive publishDiagnostics within timeout"
+    );
+
+    let requests = mock_server.received_requests().await.unwrap();
+    assert_eq!(
+        requests.len(),
+        1,
+        "expected one LT request, got {requests:#?}"
+    );
+    let body = String::from_utf8_lossy(&requests[0].body);
+    assert!(
+        body.contains("text=%60docolint%60+uses+%60tree-sitter%60+to+extract+prose+from+doc+comments%2C+markdown%2C+and+other+text+within+source+files%2C+then+checks+it+with+LanguageTool.+Works+in+Rust%2C+C%23%2C+HTML%2C+Markdown%2C+JavaScript%2FTypeScript%2C+Python%2C+and+more."),
+        "unexpected LT request body: {body}"
+    );
+
+    let shutdown = Request::new(1.into(), "shutdown".to_string(), serde_json::Value::Null);
+    client_conn.sender.send(Message::Request(shutdown)).unwrap();
+    let _ = client_conn.receiver.recv_timeout(Duration::from_secs(2));
+
+    drop(client_conn);
+    let _ = server_handle.await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_markdown_inline_code_after_comma_preserves_space() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v2/check"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "software": { "name": "LanguageTool", "version": "6.5" },
+            "warnings": {},
+            "language": { "name": "English (US)", "code": "en-US", "detectedLanguage": "en-US" },
+            "matches": []
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let (server_conn, client_conn) = Connection::memory();
+
+    let params = InitializeParams {
+        initialization_options: Some(json!({
+            "endpoint": mock_server.uri()
+        })),
+        ..Default::default()
+    };
+
+    let server_handle = tokio::spawn(async move { run(server_conn, params).await });
+
+    let uri = "file:///README.md";
+    let line = "A running LanguageTool HTTP server. By default, `docolint` expects one at `http://localhost:8081`.";
+    let did_open = Notification::new(
+        "textDocument/didOpen".to_string(),
+        DidOpenTextDocumentParams {
+            text_document: lsp_types::TextDocumentItem {
+                uri: serde_json::from_str(&format!("\"{}\"", uri)).unwrap(),
+                language_id: "markdown".to_string(),
+                version: 1,
+                text: line.to_string(),
+            },
+        },
+    );
+    client_conn
+        .sender
+        .send(Message::Notification(did_open))
+        .unwrap();
+
+    let timeout = Duration::from_secs(5);
+    let start = std::time::Instant::now();
+    let mut saw_publish = false;
+
+    while start.elapsed() < timeout {
+        if let Ok(Message::Notification(not)) = client_conn
+            .receiver
+            .recv_timeout(Duration::from_millis(100))
+            && not.method == "textDocument/publishDiagnostics"
+        {
+            let params: PublishDiagnosticsParams = serde_json::from_value(not.params).unwrap();
+            assert!(
+                params.diagnostics.is_empty(),
+                "got diagnostics: {:?}",
+                params.diagnostics
+            );
+            saw_publish = true;
+            break;
+        }
+    }
+
+    assert!(
+        saw_publish,
+        "Did not receive publishDiagnostics within timeout"
+    );
+
+    let requests = mock_server.received_requests().await.unwrap();
+    assert_eq!(
+        requests.len(),
+        1,
+        "expected one LT request, got {requests:#?}"
+    );
+    let body = String::from_utf8_lossy(&requests[0].body);
+    assert!(
+        body.contains("text=A+running+LanguageTool+HTTP+server.+By+default%2C+%60docolint%60+expects+one+at+%60http%3A%2F%2Flocalhost%3A8081%60."),
+        "unexpected LT request body: {body}"
+    );
+
+    let shutdown = Request::new(1.into(), "shutdown".to_string(), serde_json::Value::Null);
+    client_conn.sender.send(Message::Request(shutdown)).unwrap();
+    let _ = client_conn.receiver.recv_timeout(Duration::from_secs(2));
+
+    drop(client_conn);
+    let _ = server_handle.await;
+}

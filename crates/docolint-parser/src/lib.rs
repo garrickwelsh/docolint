@@ -70,11 +70,28 @@ fn language_from_extension(ext: &str) -> Option<tree_sitter::Language> {
 /// An [`AnnotatedText`] containing ordered text segments with byte offsets mapped
 /// back to the original content.
 pub fn parse_document(language_id: &str, content: &str, config: &ParserConfig) -> AnnotatedText {
+    let mut next_unit_id = 0;
+    parse_document_with_units(language_id, content, config, &mut next_unit_id)
+}
+
+fn parse_document_with_units(
+    language_id: &str,
+    content: &str,
+    config: &ParserConfig,
+    next_unit_id: &mut usize,
+) -> AnnotatedText {
     let lang = language_from_id(language_id).or_else(|| language_from_extension(language_id));
 
     match lang {
-        Some(language) => extract_text(language_id, language, content, config),
-        None => AnnotatedText::from(content),
+        Some(language) => extract_text(language_id, language, content, config, next_unit_id),
+        None => AnnotatedText {
+            segments: vec![TextSegment {
+                text: content.to_string(),
+                is_markup: false,
+                offset: 0,
+                unit_id: fresh_unit_id(next_unit_id),
+            }],
+        },
     }
 }
 
@@ -83,50 +100,132 @@ fn extract_text(
     language: tree_sitter::Language,
     content: &str,
     config: &ParserConfig,
+    next_unit_id: &mut usize,
 ) -> AnnotatedText {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&language).ok();
     let tree = match parser.parse(content, None) {
         Some(t) => t,
-        None => return AnnotatedText::from(content),
+        None => {
+            return AnnotatedText {
+                segments: vec![TextSegment {
+                    text: content.to_string(),
+                    is_markup: false,
+                    offset: 0,
+                    unit_id: fresh_unit_id(next_unit_id),
+                }],
+            };
+        }
     };
 
     match language_id {
-        "rust" | "rs" => rust_comments::extract_rust_docs(&tree, content, config),
-        "csharp" | "c#" | "cs" => csharp::extract_csharp_docs(&tree, content, config),
-        "html" => extract_html_text(&tree, content),
-        "markdown" | "md" => extract_markdown_text(content, config),
-        "css" => generic_comments::extract_comment_docs(&tree, content, language_id, config),
-        "lua" => generic_comments::extract_comment_docs(&tree, content, language_id, config),
-        "bash" | "sh" | "zsh" => {
-            generic_comments::extract_comment_docs(&tree, content, language_id, config)
-        }
-        "powershell" | "pwsh" => {
-            generic_comments::extract_comment_docs(&tree, content, language_id, config)
-        }
-        "scss" => generic_comments::extract_comment_docs(&tree, content, language_id, config),
-        "python" | "py" => {
-            generic_comments::extract_comment_docs(&tree, content, language_id, config)
-        }
-        "java" => generic_comments::extract_comment_docs(&tree, content, language_id, config),
-        "javascript" | "js" => {
-            generic_comments::extract_comment_docs(&tree, content, language_id, config)
-        }
-        "typescript" | "ts" => {
-            generic_comments::extract_comment_docs(&tree, content, language_id, config)
-        }
-        "tsx" => generic_comments::extract_comment_docs(&tree, content, language_id, config),
-        _ => AnnotatedText::from(content),
+        "rust" | "rs" => rust_comments::extract_rust_docs(&tree, content, config, next_unit_id),
+        "csharp" | "c#" | "cs" => csharp::extract_csharp_docs(&tree, content, config, next_unit_id),
+        "html" => extract_html_text(&tree, content, next_unit_id),
+        "markdown" | "md" => extract_markdown_text(content, config, next_unit_id),
+        "css" => generic_comments::extract_comment_docs(
+            &tree,
+            content,
+            language_id,
+            config,
+            next_unit_id,
+        ),
+        "lua" => generic_comments::extract_comment_docs(
+            &tree,
+            content,
+            language_id,
+            config,
+            next_unit_id,
+        ),
+        "bash" | "sh" | "zsh" => generic_comments::extract_comment_docs(
+            &tree,
+            content,
+            language_id,
+            config,
+            next_unit_id,
+        ),
+        "powershell" | "pwsh" => generic_comments::extract_comment_docs(
+            &tree,
+            content,
+            language_id,
+            config,
+            next_unit_id,
+        ),
+        "scss" => generic_comments::extract_comment_docs(
+            &tree,
+            content,
+            language_id,
+            config,
+            next_unit_id,
+        ),
+        "python" | "py" => generic_comments::extract_comment_docs(
+            &tree,
+            content,
+            language_id,
+            config,
+            next_unit_id,
+        ),
+        "java" => generic_comments::extract_comment_docs(
+            &tree,
+            content,
+            language_id,
+            config,
+            next_unit_id,
+        ),
+        "javascript" | "js" => generic_comments::extract_comment_docs(
+            &tree,
+            content,
+            language_id,
+            config,
+            next_unit_id,
+        ),
+        "typescript" | "ts" => generic_comments::extract_comment_docs(
+            &tree,
+            content,
+            language_id,
+            config,
+            next_unit_id,
+        ),
+        "tsx" => generic_comments::extract_comment_docs(
+            &tree,
+            content,
+            language_id,
+            config,
+            next_unit_id,
+        ),
+        _ => AnnotatedText {
+            segments: vec![TextSegment {
+                text: content.to_string(),
+                is_markup: false,
+                offset: 0,
+                unit_id: fresh_unit_id(next_unit_id),
+            }],
+        },
     }
 }
 
+fn fresh_unit_id(next_unit_id: &mut usize) -> usize {
+    let unit_id = *next_unit_id;
+    *next_unit_id += 1;
+    unit_id
+}
+
 /// Walk an HTML AST and extract text nodes, excluding script and style elements.
-fn extract_html_text(tree: &tree_sitter::Tree, content: &str) -> AnnotatedText {
+fn extract_html_text(
+    tree: &tree_sitter::Tree,
+    content: &str,
+    next_unit_id: &mut usize,
+) -> AnnotatedText {
     let mut segments: Vec<TextSegment> = Vec::new();
     let mut cursor = tree.walk();
     let bytes = content.as_bytes();
 
-    fn walk(cursor: &mut tree_sitter::TreeCursor, bytes: &[u8], segments: &mut Vec<TextSegment>) {
+    fn walk(
+        cursor: &mut tree_sitter::TreeCursor,
+        bytes: &[u8],
+        segments: &mut Vec<TextSegment>,
+        next_unit_id: &mut usize,
+    ) {
         let node = cursor.node();
         let kind = node.kind();
 
@@ -145,20 +244,21 @@ fn extract_html_text(tree: &tree_sitter::Tree, content: &str) -> AnnotatedText {
                     text,
                     is_markup: false,
                     offset: start,
+                    unit_id: fresh_unit_id(next_unit_id),
                 });
             }
         }
 
         if cursor.goto_first_child() {
-            walk(cursor, bytes, segments);
+            walk(cursor, bytes, segments, next_unit_id);
             while cursor.goto_next_sibling() {
-                walk(cursor, bytes, segments);
+                walk(cursor, bytes, segments, next_unit_id);
             }
             cursor.goto_parent();
         }
     }
 
-    walk(&mut cursor, bytes, &mut segments);
+    walk(&mut cursor, bytes, &mut segments, next_unit_id);
     AnnotatedText { segments }
 }
 
@@ -227,18 +327,25 @@ fn fenced_code_language_and_content<'a>(
 }
 
 /// Pushes non-empty, non-whitespace span as prose segment at original byte offset.
-fn push_nonempty_segment(segments: &mut Vec<TextSegment>, content: &str, start: usize, end: usize) {
+fn push_nonempty_segment(
+    segments: &mut Vec<TextSegment>,
+    content: &str,
+    start: usize,
+    end: usize,
+    unit_id: usize,
+) {
     if start >= end {
         return;
     }
     let gap_text = &content[start..end];
-    // Preserve newline-only gaps between block nodes so LanguageTool does not
-    // concatenate adjacent lines or paragraphs into a single sentence.
-    if !gap_text.trim().is_empty() || gap_text.contains(['\n', '\r']) {
+    // Preserve literal gaps between Markdown nodes so spaces around inline markup
+    // and paragraph/block separators survive in the checked text.
+    if !gap_text.is_empty() {
         segments.push(TextSegment {
             text: gap_text.to_string(),
             is_markup: false,
             offset: start,
+            unit_id,
         });
     }
 }
@@ -250,7 +357,11 @@ fn push_nonempty_segment(segments: &mut Vec<TextSegment>, content: &str, start: 
 /// structure. Plain prose comes from non-markup spans. Supported fenced code
 /// blocks recurse into language-specific parsers, then shift extracted segment
 /// offsets back into original Markdown document.
-fn extract_markdown_text(content: &str, config: &ParserConfig) -> AnnotatedText {
+fn extract_markdown_text(
+    content: &str,
+    config: &ParserConfig,
+    next_unit_id: &mut usize,
+) -> AnnotatedText {
     let mut parser = tree_sitter_md::MarkdownParser::default();
     let tree = match parser.parse(content.as_bytes(), None) {
         Some(t) => t,
@@ -265,16 +376,22 @@ fn extract_markdown_text(content: &str, config: &ParserConfig) -> AnnotatedText 
         content: &str,
         segments: &mut Vec<TextSegment>,
         config: &ParserConfig,
+        next_unit_id: &mut usize,
+        current_unit_id: Option<usize>,
     ) {
         let node = cursor.node();
         let kind = node.kind();
+        let paragraph_unit_id = current_unit_id.or_else(|| {
+            matches!(kind, "paragraph" | "inline").then(|| fresh_unit_id(next_unit_id))
+        });
 
         // Fenced code blocks delegate into language-specific parsers when supported.
         if kind == "fenced_code_block" && !cursor.is_inline() {
             let (lang, code_content) = fenced_code_language_and_content(node, content);
             if should_parse_fenced_code(lang, code_content) {
                 let content_start = code_fence_node_start(node, content);
-                let mut inner_annotated = parse_document(lang, code_content, config);
+                let mut inner_annotated =
+                    parse_document_with_units(lang, code_content, config, next_unit_id);
                 for segment in &mut inner_annotated.segments {
                     segment.offset += content_start;
                 }
@@ -297,9 +414,22 @@ fn extract_markdown_text(content: &str, config: &ParserConfig) -> AnnotatedText 
             loop {
                 let child_start = cursor.node().start_byte();
                 // Emit prose that sits between current child boundaries.
-                push_nonempty_segment(segments, content, last_offset, child_start);
+                push_nonempty_segment(
+                    segments,
+                    content,
+                    last_offset,
+                    child_start,
+                    paragraph_unit_id.unwrap_or_else(|| fresh_unit_id(next_unit_id)),
+                );
 
-                walk(cursor, content, segments, config);
+                walk(
+                    cursor,
+                    content,
+                    segments,
+                    config,
+                    next_unit_id,
+                    paragraph_unit_id,
+                );
 
                 last_offset = cursor.node().end_byte();
                 if !cursor.goto_next_sibling() {
@@ -309,7 +439,13 @@ fn extract_markdown_text(content: &str, config: &ParserConfig) -> AnnotatedText 
 
             let node_end = node.end_byte();
             // Emit trailing prose after last child in current node.
-            push_nonempty_segment(segments, content, last_offset, node_end);
+            push_nonempty_segment(
+                segments,
+                content,
+                last_offset,
+                node_end,
+                paragraph_unit_id.unwrap_or_else(|| fresh_unit_id(next_unit_id)),
+            );
             cursor.goto_parent();
         } else {
             // Leaf nodes contribute prose directly when not structural containers.
@@ -324,13 +460,21 @@ fn extract_markdown_text(content: &str, config: &ParserConfig) -> AnnotatedText 
                         text: text.to_string(),
                         is_markup: false,
                         offset: start,
+                        unit_id: paragraph_unit_id.unwrap_or_else(|| fresh_unit_id(next_unit_id)),
                     });
                 }
             }
         }
     }
 
-    walk(&mut cursor, content, &mut segments, config);
+    walk(
+        &mut cursor,
+        content,
+        &mut segments,
+        config,
+        next_unit_id,
+        None,
+    );
     AnnotatedText { segments }
 }
 
@@ -429,9 +573,16 @@ mod tests {
     fn test_rust_multiple_single_line_doc_comments() {
         let src = "/// First line\n/// Second line\nfn foo() {}";
         let result = parse_document("rust", src, &ParserConfig::default());
-        let text = result.plain_text();
-        assert!(text.contains("First line"), "got: {text}");
-        assert!(text.contains("Second line"), "got: {text}");
+        assert_eq!(result.segments.len(), 2);
+        assert_eq!(
+            result.plain_text(),
+            "First line Second line",
+            "segments: {:?}",
+            result.segments
+        );
+        assert_eq!(result.segments[0].unit_id, result.segments[1].unit_id);
+        assert_eq!(result.segments[0].text, "First line ");
+        assert_eq!(result.segments[1].text, "Second line");
     }
 
     #[test]
@@ -478,6 +629,25 @@ mod tests {
     }
 
     #[test]
+    fn test_rust_stacked_inline_comments_share_unit_id_and_join_with_space() {
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
+        let src =
+            "// This is the start of a sentence,\n// this continues the sentence.\nfn foo() {}";
+        let result = parse_document("rust", src, &config);
+
+        assert_eq!(result.segments.len(), 2);
+        assert_eq!(
+            result.plain_text(),
+            "This is the start of a sentence, this continues the sentence."
+        );
+        assert_eq!(result.segments[0].unit_id, result.segments[1].unit_id);
+        assert_eq!(result.segments[0].text, "This is the start of a sentence, ");
+        assert_eq!(result.segments[1].text, "this continues the sentence.");
+    }
+
+    #[test]
     fn test_rust_inline_line_comment_offset_starts_after_delimiter() {
         let config = ParserConfig {
             include_inline_comments: true,
@@ -502,9 +672,11 @@ mod tests {
     fn test_csharp_multiple_single_line_doc_comments() {
         let src = "/// First line\n/// Second line\npublic void Foo() {}";
         let result = parse_document("csharp", src, &ParserConfig::default());
-        let text = result.plain_text();
-        assert!(text.contains("First line"), "got: {text}");
-        assert!(text.contains("Second line"), "got: {text}");
+        assert_eq!(result.segments.len(), 2);
+        assert_eq!(result.plain_text(), "First line Second line");
+        assert_eq!(result.segments[0].unit_id, result.segments[1].unit_id);
+        assert_eq!(result.segments[0].text, "First line ");
+        assert_eq!(result.segments[1].text, "Second line");
     }
 
     #[test]
@@ -642,6 +814,45 @@ mod tests {
     }
 
     #[test]
+    fn test_markdown_paragraph_with_inline_code_shares_unit_id() {
+        let src = "`docolint` uses `tree-sitter` to extract prose from doc comments, markdown, and other text within source files, then checks it with LanguageTool. Works in Rust, C#, HTML, Markdown, JavaScript/TypeScript, Python, and more.";
+        let result = parse_document("markdown", src, &ParserConfig::default());
+
+        let prose_segments = result
+            .segments
+            .iter()
+            .filter(|segment| !segment.text.trim().is_empty())
+            .collect::<Vec<_>>();
+        assert!(prose_segments.len() > 2, "segments: {:?}", result.segments);
+        let first_unit_id = prose_segments[0].unit_id;
+        assert!(
+            prose_segments
+                .iter()
+                .all(|segment| segment.unit_id == first_unit_id),
+            "segments: {:?}",
+            result.segments
+        );
+        assert_eq!(result.plain_text(), src, "segments: {:?}", result.segments);
+    }
+
+    #[test]
+    fn test_markdown_preserves_space_before_inline_code_after_comma() {
+        let src = "A running LanguageTool HTTP server. By default, `docolint` expects one at `http://localhost:8081`.";
+        let result = parse_document("markdown", src, &ParserConfig::default());
+
+        assert_eq!(result.plain_text(), src, "segments: {:?}", result.segments);
+        let first_unit_id = result.segments[0].unit_id;
+        assert!(
+            result
+                .segments
+                .iter()
+                .all(|segment| segment.unit_id == first_unit_id),
+            "segments: {:?}",
+            result.segments
+        );
+    }
+
+    #[test]
     fn test_markdown_fenced_code_rust_recursion() {
         let src = "# Title\n\n```rust\n/// Doc comment\nfn foo() {}\n```";
         let result = parse_document("markdown", src, &ParserConfig::default());
@@ -753,6 +964,33 @@ mod tests {
         let result = parse_document("css", src, &config);
         assert_eq!(result.segments.len(), 1);
         assert_eq!(result.segments[0].offset, src.find("/*").unwrap());
+    }
+
+    #[test]
+    fn test_css_multiline_block_comment_preserves_plain_text_and_later_line_offsets() {
+        let config = ParserConfig::default();
+        let src = "/*\n * First line\n * Second line\n */\n.foo { color: red; }";
+        let result = parse_document("css", src, &config);
+
+        assert_eq!(result.plain_text(), "First line Second line");
+        assert_eq!(result.segments.len(), 2);
+        assert_eq!(result.segments[0].text, "First line ");
+        assert_eq!(result.segments[1].text, "Second line");
+        assert_eq!(result.segments[0].offset, src.find("First line").unwrap());
+        assert_eq!(result.segments[1].offset, src.find("Second line").unwrap());
+        assert_eq!(result.segments[0].unit_id, result.segments[1].unit_id);
+    }
+
+    #[test]
+    fn test_css_comments_separated_by_code_do_not_share_unit_id() {
+        let config = ParserConfig::default();
+        let src = "/* First comment */\n.foo { color: red; }\n/* Second comment */";
+        let result = parse_document("css", src, &config);
+
+        assert_eq!(result.segments.len(), 2);
+        assert_eq!(result.segments[0].text, "First comment");
+        assert_eq!(result.segments[1].text, "Second comment");
+        assert_ne!(result.segments[0].unit_id, result.segments[1].unit_id);
     }
 
     // ── Cycle 2: Lua comment extraction ──────────────────────────────────────
@@ -881,6 +1119,54 @@ mod tests {
         let result = parse_document("javascript", src, &config);
         assert_eq!(result.segments.len(), 1);
         assert_eq!(result.segments[0].offset, src.find("Doc").unwrap());
+    }
+
+    #[test]
+    fn test_js_multiline_doc_block_comment_preserves_plain_text_and_later_line_offsets() {
+        let config = ParserConfig::default();
+        let src = "/**\n * First line\n * Second line\n */\nconst x = 1;";
+        let result = parse_document("javascript", src, &config);
+
+        assert_eq!(result.plain_text(), "First line Second line");
+        assert_eq!(result.segments.len(), 2);
+        assert_eq!(result.segments[0].text, "First line ");
+        assert_eq!(result.segments[1].text, "Second line");
+        assert_eq!(result.segments[0].offset, src.find("First line").unwrap());
+        assert_eq!(result.segments[1].offset, src.find("Second line").unwrap());
+        assert_eq!(result.segments[0].unit_id, result.segments[1].unit_id);
+    }
+
+    #[test]
+    fn test_js_comments_separated_by_code_do_not_share_unit_id() {
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
+        let src = "// First comment\nconst x = 1;\n// Second comment";
+        let result = parse_document("javascript", src, &config);
+
+        assert_eq!(result.segments.len(), 2);
+        assert_eq!(result.segments[0].text, "First comment");
+        assert_eq!(result.segments[1].text, "Second comment");
+        assert_ne!(result.segments[0].unit_id, result.segments[1].unit_id);
+    }
+
+    #[test]
+    fn test_js_stacked_inline_comments_share_unit_id_and_join_with_space() {
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
+        let src =
+            "// This is the start of a sentence,\n// this continues the sentence.\nconst x = 1;";
+        let result = parse_document("javascript", src, &config);
+
+        assert_eq!(result.segments.len(), 2);
+        assert_eq!(
+            result.plain_text(),
+            "This is the start of a sentence, this continues the sentence."
+        );
+        assert_eq!(result.segments[0].unit_id, result.segments[1].unit_id);
+        assert_eq!(result.segments[0].text, "This is the start of a sentence, ");
+        assert_eq!(result.segments[1].text, "this continues the sentence.");
     }
 
     // ── Cycle 11: Markdown recursion with new language ───────────────────────

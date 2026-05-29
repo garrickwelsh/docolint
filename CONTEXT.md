@@ -5,6 +5,7 @@
 ## Glossary
 
 ### Core Concepts
+- **Check Unit**: Canonical prose grouping for one LanguageTool request. The parser assigns a `unit_id` to related `TextSegment` values so the server checks one logical prose block at a time and avoids grammar context crossing code gaps.
 - **docolint**: The project name. A Rust-based LSP server for documentation grammar checking with optional LanguageTool dictionary spelling checks.
 - **Inline Comment Inclusion**: Configuration that includes non-documentation comments in grammar and spelling checks for languages that distinguish documentation comments from inline comments.
 - **LanguageTool Language**: Configured LanguageTool language code (for example `en-US` or `en-AU`) used for requests and for deriving the dictionary spelling rule ID when spell checking is disabled.

@@ -258,26 +258,31 @@ mod tests {
                     text: "Hello ".to_string(),
                     is_markup: false,
                     offset: 0,
+                    unit_id: 0,
                 },
                 TextSegment {
                     text: "<b>".to_string(),
                     is_markup: true,
                     offset: 6,
+                    unit_id: 1,
                 },
                 TextSegment {
                     text: "wurld".to_string(),
                     is_markup: false,
                     offset: 9,
+                    unit_id: 2,
                 },
                 TextSegment {
                     text: "</b>".to_string(),
                     is_markup: true,
                     offset: 14,
+                    unit_id: 3,
                 },
                 TextSegment {
                     text: "!".to_string(),
                     is_markup: false,
                     offset: 18,
+                    unit_id: 4,
                 },
             ],
         };
@@ -345,26 +350,31 @@ mod tests {
                     text: "Hello ".to_string(),
                     is_markup: false,
                     offset: 0,
+                    unit_id: 0,
                 },
                 TextSegment {
                     text: "<b>".to_string(),
                     is_markup: true,
                     offset: 6,
+                    unit_id: 1,
                 },
                 TextSegment {
                     text: "world".to_string(),
                     is_markup: false,
                     offset: 9,
+                    unit_id: 2,
                 },
                 TextSegment {
                     text: "</b>".to_string(),
                     is_markup: true,
                     offset: 14,
+                    unit_id: 3,
                 },
                 TextSegment {
                     text: "!".to_string(),
                     is_markup: false,
                     offset: 18,
+                    unit_id: 4,
                 },
             ],
         };
