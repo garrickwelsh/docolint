@@ -130,19 +130,13 @@ Focus: Split long, multi-responsibility functions while preserving behavior.
 ### Design Decisions
 See [docs/adr/0002-function-length-and-readability-refactor-policy.md](docs/adr/0002-function-length-and-readability-refactor-policy.md).
 
-### Stepwise Plan (each step updates this plan + writes handoff doc)
+### Stepwise Plan
 - [x] **Step 1 (Red)**: Add parser tests for `extract_markdown_text` helper behavior.
-  - Handoff: `docs/handoff/phase-8-step-1-parser-red-tests.md`
 - [x] **Step 2 (Green/Refactor)**: Extract markdown parsing helpers from `extract_markdown_text`.
-  - Handoff: `docs/handoff/phase-8-step-2-parser-helper-extract.md`
 - [x] **Step 3 (Red)**: Add server tests for `run` request/notification handler behavior.
-  - Handoff: `docs/handoff/phase-8-step-3-server-red-tests.md`
 - [x] **Step 4 (Green/Refactor)**: Extract request handling from `run`.
-  - Handoff: `docs/handoff/phase-8-step-4-server-request-handlers.md`
 - [x] **Step 5 (Green/Refactor)**: Extract notification handling from `run`.
-  - Handoff: `docs/handoff/phase-8-step-5-server-notification-handlers.md`
 - [x] **Step 6 (Verify)**: Run full verification and update graph.
-  - Handoff: `docs/handoff/phase-8-step-6-verification-graph.md`
 
 ## Phase 9: Language-Specific Spell Check Toggle
 Focus: Let editors choose LanguageTool language and disable only that language's dictionary spelling rule.
@@ -162,20 +156,14 @@ Focus: Split comment extraction by cohesive responsibility, preserve Stage 1 beh
 - Stage 2 improves C# and generic doc-comment offset precision without taking on XML-aware C# parsing.
 - Shared extraction modules stay private to `docolint-parser`; `parse_document()` and `ParserConfig` remain the public interface.
 
-### Stepwise Plan (each step updates this plan + writes handoff doc)
+### Stepwise Plan
 
 - [x] **Step 1 (Red)**: Add characterization tests for current C#, JavaScript, Java, CSS, Bash, and Python comment offset behavior.
-  - Handoff: `docs/handoff/phase-10-step-1-parser-offset-characterization-tests.md`
 - [x] **Step 2 (Green/Refactor)**: Split parser comment extraction into private modules, add a shared comment-node walker, and preserve current Rust/C#/generic classifier behavior.
-  - Handoff: `docs/handoff/phase-10-step-2-parser-shared-comment-walker.md`
 - [x] **Step 3 (Verify)**: Run targeted parser verification for Stage 1 and stop for manual review/commit.
-  - Handoff: `docs/handoff/phase-10-step-3-parser-stage-1-verification.md`
 - [x] **Step 4 (Red)**: Add offset-invariant tests for C# and generic doc-comment extractors.
-  - Handoff: `docs/handoff/phase-10-step-4-parser-offset-invariant-tests.md`
 - [x] **Step 5 (Green/Refactor)**: Improve C# and generic doc-comment offset precision toward the retained-prose invariant without XML-aware parsing.
-  - Handoff: `docs/handoff/phase-10-step-5-parser-offset-precision-implementation.md`
 - [x] **Step 6 (Verify)**: Run Stage 2 verification and stop for manual review/commit.
-  - Handoff: `docs/handoff/phase-10-step-6-parser-stage-2-verification.md`
 
 ### Stage 2 Follow-ups
 
