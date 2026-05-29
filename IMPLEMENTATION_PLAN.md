@@ -5,6 +5,18 @@ This project will be developed using a strict **Test-Driven Development (TDD)** 
 
 Development will be organized by module to support isolated subagent execution.
 
+## TODOs
+
+### Parser Extraction Follow-ups
+
+- [ ] Investigate optional filtering for code-like inline comments to reduce false positives in opt-in inline comment checking.
+- [ ] Add nested parser support for structured doc comment text such as C# XML documentation comments so tags can be treated as markup and prose checked more precisely.
+- [ ] Normalize leading `*` prefixes in non-doc multi-line block comments without losing precise diagnostic offset mapping.
+
+### Future Language Support
+
+- [ ] Support downloading and C-compiling additional Tree-sitter grammars (e.g., Java, Kotlin) dynamically based on configuration.
+
 ## Phase 0: Environment Setup
 Focus: Ensuring the development environment and network boundaries are ready.
 
@@ -72,9 +84,6 @@ Public Interface: `pub async fn run(connection: Connection, init_options: Initia
 - [x] **TDD Cycle 20**: OS-level Integration Test using `std::process::Command` + `Stdio::piped()` to verify JSON-RPC over `stdin`/`stdout`.
 - [x] Linting (`clippy`) and Typechecking (`cargo check`).
 
-## Phase 6 (Post-MVP): Dynamic Grammars
-- [ ] Support downloading and C-compiling additional Tree-sitter grammars (e.g., Java, Kotlin) dynamically based on configuration.
-
 ## Phase 7: Extended Language Support
 Focus: Add comment extraction for 6 new languages + fix existing JS/TS/Python. Remove JSON.
 
@@ -114,12 +123,6 @@ pub fn parse_document(language_id: &str, content: &str, config: &ParserConfig) -
 - [x] **TDD Cycle 31**: Markdown recursive parsing with Java fenced blocks
 - [x] **TDD Cycle 32**: `include_inline_comments` flows from `InitializationOptions` → `ServerState` → `ParserConfig`
 - [x] Linting (`clippy`) and Typechecking (`cargo check`) — zero warnings
-- [ ] Future: Refactor Rust/C# custom extractors and generic comment extractor toward shared path if offset precision and doc-comment behavior can stay intact.
-- [ ] Future: Investigate optional filtering for code-like inline comments to reduce false positives in opt-in inline comment checking.
-- [ ] Future: Add nested parser support for structured doc comment text such as C# XML documentation comments so tags can be treated as markup and prose checked more precisely.
-- [ ] Future: Improve stripped block comment offset mapping so diagnostics can start at exact prose position after leading `*` prefixes, not coarse post-delimiter offsets.
-- [ ] Future: Normalize leading `*` prefixes in non-doc multi-line block comments without losing precise diagnostic offset mapping.
-- [ ] Future: Improve C# doc comment offset mapping so stripped `///` and XML doc content map diagnostics to exact prose positions.
 
 ## Phase 8: Long Function Readability Refactor
 Focus: Split long, multi-responsibility functions while preserving behavior.
@@ -148,3 +151,33 @@ Focus: Let editors choose LanguageTool language and disable only that language's
 - [x] **TDD Cycle 34**: Pass configured language through LT client requests.
 - [x] **TDD Cycle 35**: Derive and disable `MORFOLOGIK_RULE_<LANG>` when spell check is disabled.
 - [x] **TDD Cycle 36**: Update docs and glossary for grammar-first, optional spelling behavior.
+
+## Phase 10: Comment Extractor Deepening
+Focus: Split comment extraction by cohesive responsibility, preserve Stage 1 behavior, then improve doc-comment offset precision in Stage 2.
+
+### Design Decisions
+
+- Stage 1 is behavior-preserving. Shared traversal and file splitting must not change current extracted text or offsets.
+- Stage 2 adopts the offset invariant: `TextSegment.offset` should point at the first byte of retained prose whenever possible.
+- Stage 2 improves C# and generic doc-comment offset precision without taking on XML-aware C# parsing.
+- Shared extraction modules stay private to `docolint-parser`; `parse_document()` and `ParserConfig` remain the public interface.
+
+### Stepwise Plan (each step updates this plan + writes handoff doc)
+
+- [x] **Step 1 (Red)**: Add characterization tests for current C#, JavaScript, Java, CSS, Bash, and Python comment offset behavior.
+  - Handoff: `docs/handoff/phase-10-step-1-parser-offset-characterization-tests.md`
+- [x] **Step 2 (Green/Refactor)**: Split parser comment extraction into private modules, add a shared comment-node walker, and preserve current Rust/C#/generic classifier behavior.
+  - Handoff: `docs/handoff/phase-10-step-2-parser-shared-comment-walker.md`
+- [x] **Step 3 (Verify)**: Run targeted parser verification for Stage 1 and stop for manual review/commit.
+  - Handoff: `docs/handoff/phase-10-step-3-parser-stage-1-verification.md`
+- [ ] **Step 4 (Red)**: Add offset-invariant tests for C# and generic doc-comment extractors.
+  - Handoff: `docs/handoff/phase-10-step-4-parser-offset-invariant-tests.md`
+- [ ] **Step 5 (Green/Refactor)**: Improve C# and generic doc-comment offset precision toward the retained-prose invariant without XML-aware parsing.
+  - Handoff: `docs/handoff/phase-10-step-5-parser-offset-precision-implementation.md`
+- [ ] **Step 6 (Verify)**: Run Stage 2 verification and stop for manual review/commit.
+  - Handoff: `docs/handoff/phase-10-step-6-parser-stage-2-verification.md`
+
+### Stage 2 Follow-ups
+
+- [ ] Improve stripped block comment offset mapping so diagnostics can start at exact prose position after leading `*` prefixes, not coarse post-delimiter offsets.
+- [ ] Improve C# doc comment offset mapping so stripped `///` and XML doc content map diagnostics to exact prose positions.

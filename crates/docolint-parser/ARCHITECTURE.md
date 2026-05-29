@@ -12,7 +12,9 @@ Extract checkable prose from source files with `tree-sitter`. Preserve offsets s
 ## Internal Map
 
 - Language resolution: map LSP language IDs and file extensions to grammars.
-- Comment extraction: Rust, C#, JS/TS/Java, shell-style, CSS-style comment handling.
+- Comment extraction dispatch: `lib.rs` keeps public entrypoints and routes to private extractors.
+- Shared comment traversal: `comments.rs` walks Tree-sitter comment nodes and centralizes shared segment helpers.
+- Language-specific comment classifiers: `rust_comments.rs`, `csharp.rs`, and `generic_comments.rs` preserve language-family extraction rules.
 - Markup extraction: HTML text nodes and Markdown prose.
 - Recursive parsing: fenced Markdown code blocks parsed with nested language grammars.
 - Offset tracking: each extracted segment keeps original byte offset.
