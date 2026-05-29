@@ -4,3 +4,6 @@ graphify-out
 # Added by cargo
 
 /target
+opencode-quota
+.opencode
+.gemini

@@ -1,18 +1,3 @@
-## graphify
-
-This project has knowledge graph at `graphify-out/` with cross-file relationships.
-
-When user types `/graphify`, invoke `skill` with `skill: "graphify"` before anything else.
-
-Rules:
-- For codebase questions, first run `graphify query "<question>"` when `graphify-out/graph.json` exists.
-- Use `graphify path "<A>" "<B>"` for relationships.
-- Use `graphify explain "<concept>"` for focused concepts.
-- Dirty `graphify-out/` files do not justify skipping graphify.
-- If `graphify-out/wiki/index.md` exists, use it for broad navigation.
-- Read `graphify-out/GRAPH_REPORT.md` only for broad architecture review or when scoped graph queries are not enough.
-- After modifying code, run `graphify update .`.
-
 ## Project Docs
 
 Read docs in this order:
