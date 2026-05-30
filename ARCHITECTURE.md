@@ -16,7 +16,7 @@
 - `crates/docolint-server`: LSP runtime, per-unit LanguageTool orchestration, cached diagnostics, code actions, container recovery.
 - `crates/docolint-parser`: `tree-sitter` extraction, parser-assigned check units, recursive Markdown parsing.
 - `crates/docolint-client`: LanguageTool HTTP client.
-- `crates/docolint-dictionary`: `.docolint-ignore` loading and filtering.
+- `crates/docolint-dictionary`: workspace-root `.docolint-ignore` loading and filtering.
 - `crates/docolint-types`: shared types for extracted text, `unit_id` metadata, and grammar errors.
 
 ## Main Flow

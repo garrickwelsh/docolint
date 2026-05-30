@@ -48,68 +48,41 @@ pub fn server_capabilities() -> serde_json::Value {
     .unwrap()
 }
 
-/// Generates "ignore word" code actions for each `.docolint-ignore` file between
-/// the document and the workspace root.
+/// Generates a single "ignore word" code action for the workspace-root
+/// `.docolint-ignore` file.
 ///
 /// Each action, when executed by the editor, sends a `docolint.ignoreWord` command
 /// with the word and target file path.
 ///
 /// # Arguments
-/// * `workspace_root` - Root of the workspace. Used to label the root-level action.
-/// * `document_path` - Path to the source file being edited. Walking starts from
-///   this file's parent directory.
+/// * `workspace_root` - Root of the workspace and the only dictionary target.
 /// * `word` - The word to offer ignoring.
 /// * `uri` - The document's LSP URI, passed to the command for rechecking after ignore.
 ///
 /// # Returns
-/// A vector of `CodeActionOrCommand`, one per directory level up to (and including)
-/// the workspace root.
+/// A vector containing one `CodeActionOrCommand` for the workspace dictionary.
 pub fn generate_ignore_actions(
     workspace_root: &Path,
-    document_path: &Path,
     word: &str,
     uri: &str,
 ) -> Vec<CodeActionOrCommand> {
-    let mut actions = Vec::new();
-    let mut current = document_path.parent();
+    let ignore_file = workspace_root.join(".docolint-ignore");
+    let title = format!("Ignore '{}' in workspace root", word);
 
-    while let Some(path) = current {
-        let ignore_file = path.join(".docolint-ignore");
-        let ignore_file_str = ignore_file.to_string_lossy().to_string();
-
-        let title = if path == workspace_root {
-            format!("Ignore '{}' in workspace root", word)
-        } else {
-            format!(
-                "Ignore '{}' in {}",
-                word,
-                path.file_name().unwrap_or_default().to_string_lossy()
-            )
-        };
-
-        let action = CodeAction {
-            title: title.clone(),
-            kind: Some(CodeActionKind::QUICKFIX),
-            command: Some(Command {
-                title,
-                command: "docolint.ignoreWord".to_string(),
-                arguments: Some(vec![
-                    serde_json::Value::String(word.to_string()),
-                    serde_json::Value::String(ignore_file_str),
-                    serde_json::Value::String(uri.to_string()),
-                ]),
-            }),
-            ..Default::default()
-        };
-        actions.push(CodeActionOrCommand::CodeAction(action));
-
-        if path == workspace_root {
-            break;
-        }
-        current = path.parent();
-    }
-
-    actions
+    vec![CodeActionOrCommand::CodeAction(CodeAction {
+        title: title.clone(),
+        kind: Some(CodeActionKind::QUICKFIX),
+        command: Some(Command {
+            title,
+            command: "docolint.ignoreWord".to_string(),
+            arguments: Some(vec![
+                serde_json::Value::String(word.to_string()),
+                serde_json::Value::String(ignore_file.to_string_lossy().to_string()),
+                serde_json::Value::String(uri.to_string()),
+            ]),
+        }),
+        ..Default::default()
+    })]
 }
 
 /// Generates replacement code actions from a diagnostic's suggested replacements.
@@ -936,15 +909,22 @@ fn handle_ignore_word_command(
     }
 
     let word = args[0].as_str().unwrap_or("").to_string();
-    let ignore_path = args[1].as_str().unwrap_or("").to_string();
     let uri = args[2].as_str().unwrap_or("").to_string();
 
-    if ignore_path.is_empty() || word.is_empty() {
+    if word.is_empty() {
         return;
     }
 
+    let workspace_root = {
+        let state = state.read().unwrap();
+        match state.workspace_root.clone() {
+            Some(root) => root,
+            None => return,
+        }
+    };
+
     let mut dict = Dictionary::new();
-    let _ = dict.add_word(&word, Path::new(&ignore_path));
+    let _ = dict.add_word(&word, &workspace_root.join(".docolint-ignore"));
 
     if !uri.is_empty() {
         recheck_document(state, sender, uri);
@@ -992,27 +972,23 @@ fn collect_code_actions(
         .unwrap_or_default();
 
     let mut actions = Vec::new();
-    let uri_val = serde_json::to_value(&uri).unwrap();
-    if let Ok(url) = serde_json::from_value::<Url>(uri_val) {
-        let path = url.to_file_path().unwrap_or_default();
-        let uri_str = uri.to_string();
+    let uri_str = uri.to_string();
 
-        for diag in params.context.diagnostics {
-            let content = state
-                .read()
-                .unwrap()
-                .document_content
-                .get(&uri_str)
-                .cloned();
-            if let Some(content) = content {
-                let start_offset = position_to_offset(&content, diag.range.start);
-                let end_offset = position_to_offset(&content, diag.range.end);
-                if start_offset < end_offset && end_offset <= content.len() {
-                    let word = &content[start_offset..end_offset];
-                    actions.extend(generate_ignore_actions(&root, &path, word, &uri_str));
-                }
-                actions.extend(generate_replacement_actions(&diag, &uri, &content));
+    for diag in params.context.diagnostics {
+        let content = state
+            .read()
+            .unwrap()
+            .document_content
+            .get(&uri_str)
+            .cloned();
+        if let Some(content) = content {
+            let start_offset = position_to_offset(&content, diag.range.start);
+            let end_offset = position_to_offset(&content, diag.range.end);
+            if start_offset < end_offset && end_offset <= content.len() {
+                let word = &content[start_offset..end_offset];
+                actions.extend(generate_ignore_actions(&root, word, &uri_str));
             }
+            actions.extend(generate_replacement_actions(&diag, &uri, &content));
         }
     }
 
@@ -1724,6 +1700,37 @@ mod tests {
     }
 
     #[test]
+    fn test_rust_doc_comment_diagnostic_maps_to_retained_prose_start() {
+        let content = "/// Deserialized from `InitializeParams.initialization_options`.\n///\n/// Allows clients to configure the LanguageTool endpoint and parser behavior.\npub struct InitializationOptions;";
+        let annotated = parse_document("rust", content, &ParserConfig::default());
+        let grouped = group_segments_by_unit(&annotated);
+        let allows_unit = grouped
+            .iter()
+            .find(|unit| unit.plain_text().contains("Allows clients"))
+            .expect("missing Allows paragraph unit");
+        let plain_text = allows_unit.plain_text();
+        let allows_offset = plain_text.find("Allows").unwrap();
+
+        let diagnostic = grammar_error_to_diagnostic(
+            content,
+            allows_unit,
+            GrammarError {
+                message: "Grammar".to_string(),
+                offset: allows_offset,
+                length: "Allows".len(),
+                replacements: vec![],
+                rule_id: "RULE".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(diagnostic.range.start.line, 2);
+        assert_eq!(diagnostic.range.start.character, 4);
+        assert_eq!(diagnostic.range.end.line, 2);
+        assert_eq!(diagnostic.range.end.character, 10);
+    }
+
+    #[test]
     fn test_offset_mapping_handles_unicode() {
         use docolint_types::TextSegment;
         let text = AnnotatedText {
@@ -1813,27 +1820,25 @@ mod tests {
     #[test]
     fn test_code_action_generation() {
         let root = Path::new("/workspaces/project");
-        let sub = root.join("src/module");
-        let doc = sub.join("file.rs");
         let uri = "file:///workspaces/project/src/module/file.rs";
 
-        let actions = generate_ignore_actions(root, &doc, "typo", uri);
+        let actions = generate_ignore_actions(root, "typo", uri);
 
-        assert_eq!(actions.len(), 3);
+        assert_eq!(actions.len(), 1);
 
         if let CodeActionOrCommand::CodeAction(a) = &actions[0] {
-            assert!(a.title.contains("module"));
+            assert!(a.title.contains("workspace root"));
             assert!(a.command.is_some());
             let cmd = a.command.as_ref().unwrap();
             assert_eq!(cmd.command, "docolint.ignoreWord");
             let args = cmd.arguments.as_ref().unwrap();
             assert_eq!(args.len(), 3);
             assert_eq!(args[0].as_str().unwrap(), "typo");
-            assert!(args[1].as_str().unwrap().ends_with(".docolint-ignore"));
+            assert_eq!(
+                args[1].as_str().unwrap(),
+                "/workspaces/project/.docolint-ignore"
+            );
             assert_eq!(args[2].as_str().unwrap(), uri);
-        }
-        if let CodeActionOrCommand::CodeAction(a) = &actions[2] {
-            assert!(a.title.contains("workspace root"));
         }
     }
 
@@ -1918,6 +1923,10 @@ mod tests {
             ..Default::default()
         });
         let mut state_raw = ServerState::new(client);
+        let workspace_root = std::env::temp_dir().join("docolint-ignore-command-root");
+        let _ = std::fs::remove_dir_all(&workspace_root);
+        std::fs::create_dir_all(&workspace_root).unwrap();
+        state_raw.workspace_root = Some(workspace_root.clone());
         let uri = "file:///tmp/test.rs".to_string();
         state_raw
             .document_content
@@ -1947,7 +1956,7 @@ mod tests {
 
         let state = Arc::new(RwLock::new(state_raw));
         let (sender, receiver) = crossbeam_channel::unbounded();
-        let ignore_file = std::env::temp_dir().join("docolint-ignore-command-test.txt");
+        let ignore_file = workspace_root.join(".docolint-ignore");
         let _ = std::fs::remove_file(&ignore_file);
 
         handle_ignore_word_command(
@@ -1957,12 +1966,15 @@ mod tests {
                 command: "docolint.ignoreWord".to_string(),
                 arguments: vec![
                     json!("testt"),
-                    json!(ignore_file.to_string_lossy().to_string()),
+                    json!("/tmp/ignored-by-server.txt"),
                     json!(uri),
                 ],
                 work_done_progress_params: Default::default(),
             },
         );
+
+        let content = std::fs::read_to_string(&ignore_file).unwrap();
+        assert!(content.contains("testt"));
 
         match receiver.recv().unwrap() {
             Message::Notification(not) => {

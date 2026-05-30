@@ -7,7 +7,7 @@ Core LSP runtime. Coordinates parsing, per-unit LanguageTool calls, dictionary f
 ## Public API
 
 - `server_capabilities()`: advertised LSP capabilities.
-- `generate_ignore_actions()`: quick fixes for `.docolint-ignore` targets.
+- `generate_ignore_actions()`: quick fix for the workspace-root `.docolint-ignore` target.
 - `generate_replacement_actions()`: quick fixes from suggested replacements.
 - `map_lt_offset_to_absolute()`: plain-text offset to source offset mapping.
 - `offset_to_position()`: source byte offset to LSP position.
@@ -25,7 +25,7 @@ Core LSP runtime. Coordinates parsing, per-unit LanguageTool calls, dictionary f
 ## Key Flows
 
 - Document event -> parse -> group by `unit_id` -> check each unit -> dictionary filter -> map/cache diagnostics -> publish diagnostics.
-- Diagnostic request -> replacement and ignore-word code actions.
+- Diagnostic request -> replacement and workspace-dictionary ignore-word code actions.
 - Dictionary change -> reload ignore words -> re-filter cached diagnostics -> republish.
 - LanguageTool failure -> circuit breaker cooldown -> retry after window expires.
 

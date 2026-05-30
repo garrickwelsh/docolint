@@ -2,7 +2,7 @@
 name = "docolint-dictionary"
 version = "0.1.4"
 edition.workspace = true
-description = "Hierarchical ignore-word dictionary for docolint"
+description = "Workspace-root ignore-word dictionary for docolint"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

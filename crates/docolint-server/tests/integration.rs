@@ -485,6 +485,104 @@ async fn test_rust_doc_paragraph_continuation_stays_in_one_unit() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_rust_doc_diagnostic_starts_at_retained_prose_after_blank_doc_line() {
+    use lsp_types::DiagnosticSeverity;
+
+    let mock_server = MockServer::start().await;
+    let expected_plain_text =
+        "Allows clients to configure the LanguageTool endpoint and parser behavior.";
+    let allows_offset = expected_plain_text.find("Allows").unwrap();
+
+    Mock::given(method("POST"))
+        .and(path("/v2/check"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "software": { "name": "LanguageTool", "version": "6.5" },
+            "warnings": {},
+            "language": { "name": "English (US)", "code": "en-US", "detectedLanguage": "en-US" },
+            "matches": [
+                {
+                    "message": "Grammar issue.",
+                    "shortMessage": "Grammar",
+                    "offset": allows_offset,
+                    "length": 6,
+                    "replacements": [],
+                    "rule": { "id": "RULE", "description": "Grammar issue" },
+                    "context": { "text": expected_plain_text, "offset": allows_offset, "length": 6 }
+                }
+            ]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let (server_conn, client_conn) = Connection::memory();
+
+    let params = InitializeParams {
+        initialization_options: Some(json!({
+            "endpoint": mock_server.uri()
+        })),
+        ..Default::default()
+    };
+
+    let server_handle = tokio::spawn(async move { run(server_conn, params).await });
+
+    let uri = "file:///test.rs";
+    let did_open = Notification::new(
+        "textDocument/didOpen".to_string(),
+        DidOpenTextDocumentParams {
+            text_document: lsp_types::TextDocumentItem {
+                uri: serde_json::from_str(&format!("\"{}\"", uri)).unwrap(),
+                language_id: "rust".to_string(),
+                version: 1,
+                text: "/// Deserialized from `InitializeParams.initialization_options`.\n///\n/// Allows clients to configure the LanguageTool endpoint and parser behavior.\npub struct InitializationOptions;".to_string(),
+            },
+        },
+    );
+    client_conn
+        .sender
+        .send(Message::Notification(did_open))
+        .unwrap();
+
+    let timeout = Duration::from_secs(5);
+    let start = std::time::Instant::now();
+    let mut found_diagnostic = false;
+
+    while start.elapsed() < timeout {
+        if let Ok(Message::Notification(not)) = client_conn
+            .receiver
+            .recv_timeout(Duration::from_millis(100))
+            && not.method == "textDocument/publishDiagnostics"
+        {
+            let params: PublishDiagnosticsParams = serde_json::from_value(not.params).unwrap();
+            if params.diagnostics.is_empty() {
+                continue;
+            }
+
+            if let Some(diagnostic) = params.diagnostics.iter().find(|diagnostic| {
+                diagnostic.range.start.line == 2 && diagnostic.range.start.character == 4
+            }) {
+                assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::INFORMATION));
+                assert_eq!(diagnostic.range.end.line, 2);
+                assert_eq!(diagnostic.range.end.character, 10);
+                found_diagnostic = true;
+                break;
+            }
+        }
+    }
+
+    assert!(
+        found_diagnostic,
+        "Did not receive publishDiagnostics with expected diagnostic within timeout"
+    );
+
+    let shutdown = Request::new(1.into(), "shutdown".to_string(), serde_json::Value::Null);
+    client_conn.sender.send(Message::Request(shutdown)).unwrap();
+    let _ = client_conn.receiver.recv_timeout(Duration::from_secs(2));
+
+    drop(client_conn);
+    let _ = server_handle.await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_markdown_paragraph_with_inline_code_checks_as_one_unit() {
     let mock_server = MockServer::start().await;
 

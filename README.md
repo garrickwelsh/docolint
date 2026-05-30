@@ -11,7 +11,7 @@ Grammar checking and optional spelling checking for code comments and prose — 
 - **AST-based extraction** — Uses `tree-sitter` to identify doc comments and prose, avoiding false positives on variable names and code
 - **Inline diagnostics** — Grammar and optional spelling errors appear directly in your editor
 - **Quick fixes** — Apply suggested replacements or ignore words with a single action
-- **Hierarchical ignore files** — `.docolint-ignore` files work like `.gitignore`, scoped from file to workspace root
+- **Workspace dictionary** — One workspace-root `.docolint-ignore` file provides the local ignore-word source of truth
 - **Zero-config** — Auto-starts a local LanguageTool container via Docker or Podman if no local server is reachable
 - **Multi-language** — Supports Rust, C#, HTML, Markdown, JavaScript, TypeScript, Python, Java, Bash, PowerShell, SCSS, CSS, and Lua
 
@@ -46,7 +46,7 @@ See [docs/SUPPORTED_LANGUAGES.md](docs/SUPPORTED_LANGUAGES.md).
 
 ## Ignoring Words
 
-Create a `.docolint-ignore` file in your project root or any subdirectory. Each line contains one word to ignore:
+Create one `.docolint-ignore` file in your project root. Each line contains one word to ignore:
 
 ```
 # Project-specific terms
@@ -55,9 +55,9 @@ tree-sitter
 languagetool
 ```
 
-Words are matched case-insensitively. Ignore files are merged hierarchically from the current file up to the workspace root.
+Words are matched case-insensitively. Only the workspace-root `.docolint-ignore` file is loaded.
 
-When hovering over a grammar error, quick-fix actions let you add the offending word to a `.docolint-ignore` file at any directory level.
+When hovering over a grammar error, quick-fix actions let you add the offending word to the workspace-root `.docolint-ignore` file.
 
 `disableSpellCheck = true` disables LanguageTool's dictionary spelling rule for the configured language, for example `MORFOLOGIK_RULE_EN_AU`, while keeping grammar and context-sensitive rules enabled.
 

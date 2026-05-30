@@ -6,8 +6,8 @@ use std::path::Path;
 
 /// Manages a set of ignored words for filtering grammar errors.
 ///
-/// Loads `.docolint-ignore` files hierarchically from the document's directory up to
-/// the workspace root. Words are stored case-insensitively (lowercased). Supports
+/// Loads the workspace-root `.docolint-ignore` file. Words are stored
+/// case-insensitively (lowercased). Supports
 /// adding new words to a target ignore file and filtering errors based on ignored words.
 pub struct Dictionary {
     ignored_words: HashSet<String>,
@@ -35,44 +35,31 @@ impl Dictionary {
         }
     }
 
-    /// Loads and merges `.docolint-ignore` files from `document_path` up to `workspace_root`.
+    /// Loads the workspace-root `.docolint-ignore` file.
     ///
-    /// Walks the directory tree upward, reading each `.docolint-ignore` file found.
     /// Lines starting with `#` are treated as comments and skipped. Empty lines are ignored.
     /// Words are lowercased before storage.
     ///
     /// # Arguments
-    /// * `workspace_root` - The root directory to stop walking at. Must be an ancestor
-    ///   of (or equal to) `document_path`'s parent.
-    /// * `document_path` - Path to the source file being checked. If this is a file,
-    ///   its parent directory is used as the starting point.
+    /// * `workspace_root` - The workspace root directory containing `.docolint-ignore`.
+    /// * `document_path` - Path to the source file being checked. Retained for API
+    ///   compatibility but ignored because the dictionary is always loaded from the
+    ///   workspace root.
     ///
     /// # Panics
     /// Does not panic. File read errors are silently ignored (missing files = no words).
     pub fn load(workspace_root: &Path, document_path: &Path) -> Self {
+        let _ = document_path;
         let mut ignored_words = HashSet::new();
 
-        let mut current = if document_path.is_file() {
-            document_path.parent()
-        } else {
-            Some(document_path)
-        };
-
-        while let Some(path) = current {
-            let ignore_file = path.join(".docolint-ignore");
-            if let Ok(content) = fs::read_to_string(ignore_file) {
-                for line in content.lines() {
-                    let word = line.trim();
-                    if !word.is_empty() && !word.starts_with('#') {
-                        ignored_words.insert(word.to_lowercase());
-                    }
+        let ignore_file = workspace_root.join(".docolint-ignore");
+        if let Ok(content) = fs::read_to_string(ignore_file) {
+            for line in content.lines() {
+                let word = line.trim();
+                if !word.is_empty() && !word.starts_with('#') {
+                    ignored_words.insert(word.to_lowercase());
                 }
             }
-
-            if path == workspace_root {
-                break;
-            }
-            current = path.parent();
         }
 
         Self { ignored_words }
@@ -155,7 +142,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_load_and_merge_ignores() {
+    fn test_loads_only_workspace_root_ignore() {
         let root = tempdir().unwrap();
         let root_path = root.path();
         let sub = root_path.join("sub");
@@ -170,7 +157,7 @@ mod tests {
         let dict = Dictionary::load(root_path, &sub.join("file.rs"));
 
         assert!(dict.is_ignored("rootword"));
-        assert!(dict.is_ignored("subword"));
+        assert!(!dict.is_ignored("subword"));
         assert!(!dict.is_ignored("unknown"));
     }
 

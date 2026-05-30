@@ -1,8 +1,8 @@
 use crate::ParserConfig;
 use crate::comments::{
     append_join_space_to_last_segment, extract_comment_segments, push_retained_comment_lines,
-    push_segment, retained_doc_block_comment_lines, strip_doc_block_comment_with_offset,
-    strip_inline_comment_with_offset, strip_triple_slash_doc_comment_with_offset,
+    push_segment, retained_doc_block_comment_lines, retained_line_doc_comment_lines,
+    strip_doc_block_comment_with_offset, strip_inline_comment_with_offset,
 };
 use docolint_types::AnnotatedText;
 
@@ -41,9 +41,8 @@ pub(super) fn extract_csharp_docs(
                     append_join_space_to_last_segment(segments, shared_unit_id);
                 }
 
-                if let Some((text, offset_delta)) = strip_triple_slash_doc_comment_with_offset(raw)
-                {
-                    push_segment(segments, text, start + offset_delta, shared_unit_id);
+                if let Some(lines) = retained_line_doc_comment_lines(raw, &["///"]) {
+                    push_retained_comment_lines(segments, start, lines, shared_unit_id);
                     last_triple_slash_row = Some(node.start_position().row);
                     last_triple_slash_unit_id = Some(shared_unit_id);
                     return;
@@ -69,7 +68,18 @@ pub(super) fn extract_csharp_docs(
 fn extract_csharp_comment(raw: &str, include_inline: bool) -> Option<(String, usize)> {
     let trimmed = raw.trim();
     if trimmed.starts_with("///") {
-        strip_triple_slash_doc_comment_with_offset(raw)
+        let lines = retained_line_doc_comment_lines(raw, &["///"])?;
+        let offset = lines.first()?.offset_delta;
+        let mut text = String::new();
+
+        for line in &lines {
+            text.push_str(line.text);
+            if line.needs_join_space {
+                text.push(' ');
+            }
+        }
+
+        Some((text, offset))
     } else if trimmed.starts_with("/**") {
         strip_doc_block_comment_with_offset(raw)
     } else if include_inline {

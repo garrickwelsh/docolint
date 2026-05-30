@@ -17,7 +17,7 @@ Extract checkable prose from source files with `tree-sitter`. Preserve offsets a
 - Language-specific comment classifiers: `rust_comments.rs`, `csharp.rs`, and `generic_comments.rs` preserve language-family extraction rules.
 - Markup extraction: HTML text nodes and Markdown prose.
 - Recursive parsing: fenced Markdown code blocks parsed with nested language grammars while reusing the same document-local `next_unit_id` stream.
-- Offset tracking: Rust doc comments and C#/generic doc-comment extractors anchor offsets at the first retained prose byte when possible; joined multi-line block comments emit one prose segment per retained line so later-line diagnostics map to later retained prose bytes while `plain_text()` stays concatenated.
+- Offset tracking: shared retained-comment helpers strip line-doc delimiters and leading comment whitespace before recording source offsets; joined multi-line block comments emit one prose segment per retained line so later-line diagnostics map to later retained prose bytes while `plain_text()` stays concatenated.
 
 ## Key Flows
 

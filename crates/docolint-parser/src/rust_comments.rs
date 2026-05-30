@@ -1,7 +1,8 @@
 use crate::ParserConfig;
 use crate::comments::{
-    extract_comment_segments, push_segment, strip_doc_block_comment_with_offset,
-    strip_inline_comment_with_offset, strip_rust_doc_comment_with_offset,
+    extract_comment_segments, push_retained_comment_lines, push_segment,
+    retained_line_doc_comment_lines, strip_doc_block_comment_with_offset,
+    strip_inline_comment_with_offset,
 };
 use docolint_types::AnnotatedText;
 
@@ -22,7 +23,7 @@ pub(super) fn extract_rust_docs(
         next_unit_id,
         |node, raw, segments, unit_id| {
             let start = node.start_byte();
-            if let Some((text, offset_delta)) = strip_rust_doc_comment_with_offset(raw) {
+            if let Some(lines) = retained_line_doc_comment_lines(raw, &["///", "//!"]) {
                 let current_row = node.start_position().row;
                 let shared_unit_id = last_doc_comment_row
                     .filter(|last_row| *last_row + 1 == current_row)
@@ -38,7 +39,7 @@ pub(super) fn extract_rust_docs(
                     unit_id
                 };
 
-                push_segment(segments, text, start + offset_delta, unit_id);
+                push_retained_comment_lines(segments, start, lines, unit_id);
                 last_doc_comment_row = Some(current_row);
                 last_doc_unit_id = Some(unit_id);
                 return;

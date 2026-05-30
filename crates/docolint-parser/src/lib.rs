@@ -497,6 +497,19 @@ fn code_fence_node_start(node: tree_sitter::Node, _content: &str) -> usize {
 mod tests {
     use super::*;
 
+    fn segment_with_text<'a>(result: &'a AnnotatedText, needle: &str) -> &'a TextSegment {
+        result
+            .segments
+            .iter()
+            .find(|segment| segment.text.contains(needle))
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing segment containing {needle:?}: {:?}",
+                    result.segments
+                )
+            })
+    }
+
     // ── Cycle 5: language mapping ────────────────────────────────────────────
 
     #[test]
@@ -657,6 +670,29 @@ mod tests {
         assert_eq!(result.segments.len(), 1);
         let start = src.find("Regular comment").unwrap();
         assert_eq!(result.segments[0].offset, start);
+    }
+
+    #[test]
+    fn test_rust_doc_comment_retains_per_line_offsets_after_delimiter_and_whitespace() {
+        let src = "/// Deserialized from `InitializeParams.initialization_options`.\n///\n/// Allows clients to configure the LanguageTool endpoint and parser behavior.\npub struct InitializationOptions;";
+        let result = parse_document("rust", src, &ParserConfig::default());
+
+        assert_eq!(result.segments.len(), 2);
+
+        let deserialized = segment_with_text(&result, "Deserialized from");
+        let allows = segment_with_text(&result, "Allows clients");
+
+        assert_eq!(
+            deserialized.text,
+            "Deserialized from `InitializeParams.initialization_options`."
+        );
+        assert_eq!(
+            allows.text,
+            "Allows clients to configure the LanguageTool endpoint and parser behavior."
+        );
+        assert_eq!(deserialized.offset, src.find("Deserialized from").unwrap());
+        assert_eq!(allows.offset, src.find("Allows clients").unwrap());
+        assert_ne!(deserialized.unit_id, allows.unit_id);
     }
 
     // ── Cycle 6: C# doc comment extraction ──────────────────────────────────
@@ -904,7 +940,7 @@ mod tests {
         let src = "fn main() {} \n/// Doc comment";
         let result = parse_document("rust", src, &ParserConfig::default());
         assert_eq!(result.segments.len(), 1);
-        let start = src.find(" Doc comment").unwrap();
+        let start = src.find("Doc comment").unwrap();
         assert_eq!(result.segments[0].offset, start);
     }
 
@@ -917,7 +953,7 @@ mod tests {
             .iter()
             .find(|s| s.text.contains("Doc"))
             .unwrap();
-        let expected_offset = src.find(" Doc").unwrap();
+        let expected_offset = src.find("Doc").unwrap();
         assert_eq!(doc_seg.offset, expected_offset);
     }
 

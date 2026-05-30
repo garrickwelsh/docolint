@@ -148,52 +148,21 @@ pub(super) fn strip_inline_comment_with_offset(raw: &str) -> Option<(String, usi
     }
 }
 
-pub(super) fn strip_triple_slash_doc_comment_with_offset(raw: &str) -> Option<(String, usize)> {
-    strip_line_doc_comment_with_prefix(raw, "///")
-}
-
-pub(super) fn strip_rust_doc_comment_with_offset(raw: &str) -> Option<(String, usize)> {
-    let prefix = if raw.trim_start().starts_with("///") {
-        "///"
-    } else if raw.trim_start().starts_with("//!") {
-        "//!"
-    } else {
-        return None;
-    };
-
-    let mut text_parts = Vec::new();
-    let mut first_offset = None;
+pub(super) fn retained_line_doc_comment_lines<'a>(
+    raw: &'a str,
+    prefixes: &[&str],
+) -> Option<Vec<RetainedCommentLine<'a>>> {
+    let mut lines = Vec::new();
     let mut running_offset = 0;
 
     for line in raw.lines() {
         let trimmed = line.trim_start();
         let indent = line.len() - trimmed.len();
-        let Some(stripped) = trimmed.strip_prefix(prefix) else {
-            running_offset += line.len() + 1;
-            continue;
-        };
-
-        let prose = stripped.trim();
-        if !prose.is_empty() {
-            first_offset.get_or_insert(running_offset + indent + prefix.len());
-            text_parts.push(prose.to_string());
-        }
-
-        running_offset += line.len() + 1;
-    }
-
-    first_offset.map(|offset| (text_parts.join(" "), offset))
-}
-
-fn strip_line_doc_comment_with_prefix(raw: &str, prefix: &str) -> Option<(String, usize)> {
-    let mut text_parts = Vec::new();
-    let mut first_offset = None;
-    let mut running_offset = 0;
-
-    for line in raw.lines() {
-        let trimmed = line.trim_start();
-        let indent = line.len() - trimmed.len();
-        let Some(stripped) = trimmed.strip_prefix(prefix) else {
+        let Some((prefix, stripped)) = prefixes.iter().find_map(|prefix| {
+            trimmed
+                .strip_prefix(prefix)
+                .map(|stripped| (*prefix, stripped))
+        }) else {
             running_offset += line.len() + 1;
             continue;
         };
@@ -201,15 +170,26 @@ fn strip_line_doc_comment_with_prefix(raw: &str, prefix: &str) -> Option<(String
         let leading_ws = stripped.len() - stripped.trim_start().len();
         let prose = stripped.trim();
         if !prose.is_empty() {
-            first_offset.get_or_insert(running_offset + indent + prefix.len() + leading_ws);
-            text_parts.push(prose.to_string());
+            lines.push(RetainedCommentLine {
+                text: prose,
+                offset_delta: running_offset + indent + prefix.len() + leading_ws,
+                needs_join_space: false,
+            });
         }
 
         running_offset += line.len() + 1;
     }
 
-    let text = text_parts.join(" ");
-    first_offset.map(|offset| (text, offset))
+    if lines.is_empty() {
+        return None;
+    }
+
+    let last_index = lines.len() - 1;
+    for line in &mut lines[..last_index] {
+        line.needs_join_space = true;
+    }
+
+    Some(lines)
 }
 
 pub(super) fn strip_doc_block_comment_with_offset(raw: &str) -> Option<(String, usize)> {
