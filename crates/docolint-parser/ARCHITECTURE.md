@@ -14,10 +14,10 @@ Extract checkable prose from source files with `tree-sitter`. Preserve offsets a
 - Language resolution: map LSP language IDs and file extensions to grammars.
 - Comment extraction dispatch: `lib.rs` keeps public entrypoints, owns the document-local `next_unit_id` counter, and routes to private extractors.
 - Shared comment traversal: `comments.rs` walks Tree-sitter comment nodes, reuses `unit_id` values across whitespace-adjacent stacked comments, splits code-gapped comments, and centralizes shared segment helpers.
-- Language-specific comment classifiers: `rust_comments.rs`, `csharp.rs`, and `generic_comments.rs` preserve language-family extraction rules.
+- Language-specific comment classifiers: `rust_comments.rs`, `csharp.rs`, `csharp_xml.rs`, and `generic_comments.rs` preserve language-family extraction rules.
 - Markup extraction: HTML text nodes and Markdown prose.
 - Recursive parsing: fenced Markdown code blocks parsed with nested language grammars while reusing the same document-local `next_unit_id` stream.
-- Offset tracking: shared retained-comment helpers strip line-doc delimiters and leading comment whitespace before recording source offsets; joined multi-line block comments emit one prose segment per retained line so later-line diagnostics map to later retained prose bytes while `plain_text()` stays concatenated.
+- Offset tracking: shared retained-comment helpers strip line-doc delimiters and leading comment whitespace before recording source offsets; joined multi-line block comments emit one prose segment per retained line so later-line diagnostics map to later retained prose bytes while `plain_text()` stays concatenated. C# Structured XML Doc Extraction builds synthetic XML fragments with byte-for-byte source maps back to original comment prose before assigning Check Units from XML block boundaries.
 
 ## Key Flows
 

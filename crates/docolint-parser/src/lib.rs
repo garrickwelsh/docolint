@@ -2,6 +2,7 @@ use docolint_types::{AnnotatedText, TextSegment};
 
 mod comments;
 mod csharp;
+mod csharp_xml;
 mod generic_comments;
 mod rust_comments;
 
@@ -21,7 +22,7 @@ fn language_from_id(id: &str) -> Option<tree_sitter::Language> {
         "markdown" | "md" => Some(tree_sitter_md::LANGUAGE.into()),
         "javascript" | "js" => Some(tree_sitter_javascript::LANGUAGE.into()),
         "python" | "py" => Some(tree_sitter_python::LANGUAGE.into()),
-        "csharp" | "c#" | "cs" => Some(tree_sitter_c_sharp::LANGUAGE.into()),
+        "csharp" | "c-sharp" | "c#" | "cs" => Some(tree_sitter_c_sharp::LANGUAGE.into()),
         "typescript" | "ts" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
         "tsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
         "css" => Some(tree_sitter_css::LANGUAGE.into()),
@@ -120,7 +121,9 @@ fn extract_text(
 
     match language_id {
         "rust" | "rs" => rust_comments::extract_rust_docs(&tree, content, config, next_unit_id),
-        "csharp" | "c#" | "cs" => csharp::extract_csharp_docs(&tree, content, config, next_unit_id),
+        "csharp" | "c-sharp" | "c#" | "cs" => {
+            csharp::extract_csharp_docs(&tree, content, config, next_unit_id)
+        }
         "html" => extract_html_text(&tree, content, next_unit_id),
         "markdown" | "md" => extract_markdown_text(content, config, next_unit_id),
         "css" => generic_comments::extract_comment_docs(
@@ -510,6 +513,32 @@ mod tests {
             })
     }
 
+    fn unit_texts(result: &AnnotatedText) -> Vec<String> {
+        let mut grouped = Vec::new();
+        let mut current_unit_id = None;
+        let mut current_text = String::new();
+
+        for segment in result.segments.iter().filter(|segment| !segment.is_markup) {
+            if current_unit_id == Some(segment.unit_id) {
+                current_text.push_str(&segment.text);
+                continue;
+            }
+
+            if !current_text.is_empty() {
+                grouped.push(std::mem::take(&mut current_text));
+            }
+
+            current_unit_id = Some(segment.unit_id);
+            current_text.push_str(&segment.text);
+        }
+
+        if !current_text.is_empty() {
+            grouped.push(current_text);
+        }
+
+        grouped
+    }
+
     // ── Cycle 5: language mapping ────────────────────────────────────────────
 
     #[test]
@@ -535,6 +564,11 @@ mod tests {
     #[test]
     fn test_language_from_id_csharp() {
         assert!(language_from_id("csharp").is_some());
+    }
+
+    #[test]
+    fn test_language_from_id_c_sharp() {
+        assert!(language_from_id("c-sharp").is_some());
     }
 
     #[test]
@@ -782,6 +816,61 @@ mod tests {
     }
 
     #[test]
+    fn test_c_sharp_alias_parses_comments() {
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
+        let src = "// Alias comment\npublic void Foo() {}";
+        let result = parse_document("c-sharp", src, &config);
+        assert!(result.plain_text().contains("Alias comment"));
+    }
+
+    #[test]
+    fn test_csharp_pragma_trailing_comment_does_not_retain_following_using_directive() {
+        let config = ParserConfig {
+            include_inline_comments: true,
+        };
+        let src = concat!(
+            "#pragma warning disable X // trailing comment\n",
+            "\n",
+            "using Foo.Bar;\n",
+            "\n",
+            "/// <summary>\n",
+            "/// Real docs.\n",
+            "/// </summary>\n",
+            "public class Foo {}"
+        );
+
+        let result = parse_document("csharp", src, &config);
+        let text = result.plain_text();
+
+        assert!(text.contains("trailing comment"), "got: {text}");
+        assert!(text.contains("Real docs"), "got: {text}");
+        assert!(!text.contains("#pragma"), "got: {text}");
+        assert!(!text.contains("warning disable"), "got: {text}");
+        assert!(!text.contains("using Foo.Bar"), "got: {text}");
+        assert!(!text.contains("Foo.Bar"), "got: {text}");
+    }
+
+    #[test]
+    fn test_csharp_pragma_directive_excluded_when_inline_comments_disabled() {
+        let src = concat!(
+            "#pragma warning disable X // trailing comment\n",
+            "using Foo.Bar;\n",
+            "/// Real docs.\n",
+            "public class Foo {}"
+        );
+
+        let result = parse_document("csharp", src, &ParserConfig::default());
+        let text = result.plain_text();
+
+        assert_eq!(text, "Real docs.");
+        assert!(!text.contains("#pragma"), "got: {text}");
+        assert!(!text.contains("trailing comment"), "got: {text}");
+        assert!(!text.contains("using Foo.Bar"), "got: {text}");
+    }
+
+    #[test]
     fn test_csharp_doc_comment_offset_starts_at_retained_prose() {
         let src = "/// Hello world\npublic void Foo() {}";
         let result = parse_document("csharp", src, &ParserConfig::default());
@@ -797,6 +886,123 @@ mod tests {
         assert_eq!(
             result.segments[0].offset,
             src.find("Block doc comment").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_csharp_xml_block_tags_create_separate_check_units() {
+        let src = concat!(
+            "/// <summary>Does useful work</summary>\n",
+            "/// <returns>Result text</returns>\n",
+            "public string Foo() => \"x\";"
+        );
+
+        let result = parse_document("csharp", src, &ParserConfig::default());
+        let units = unit_texts(&result);
+
+        assert_eq!(units, vec!["Does useful work", "Result text"]);
+    }
+
+    #[test]
+    fn test_csharp_xml_para_splits_loose_text_into_separate_check_units() {
+        let src = concat!(
+            "/// <summary>Lead text <para>Inner paragraph</para> tail text</summary>\n",
+            "public void Foo() {}"
+        );
+
+        let result = parse_document("csharp", src, &ParserConfig::default());
+        let units = unit_texts(&result);
+
+        assert_eq!(units, vec!["Lead text", "Inner paragraph", "tail text"]);
+    }
+
+    #[test]
+    fn test_csharp_xml_list_items_become_check_units_and_ignore_term_labels() {
+        let src = concat!(
+            "/// <summary><list type=\"bullet\">",
+            "<item><term>Skip</term><description>First item</description></item>",
+            "<item><description>Second item</description></item>",
+            "</list></summary>\n",
+            "public void Foo() {}"
+        );
+
+        let result = parse_document("csharp", src, &ParserConfig::default());
+        let units = unit_texts(&result);
+
+        assert_eq!(units, vec!["First item", "Second item"]);
+        assert!(!result.plain_text().contains("Skip"));
+    }
+
+    #[test]
+    fn test_csharp_xml_inline_islands_are_omitted_but_keep_spacing() {
+        let src = concat!(
+            "/// <summary>Use <c>Foo</c> with <see cref=\"T:Bar\"/> now</summary>\n",
+            "public void Foo() {}"
+        );
+
+        let result = parse_document("csharp", src, &ParserConfig::default());
+        assert_eq!(unit_texts(&result), vec!["Use with now"]);
+    }
+
+    #[test]
+    fn test_csharp_xml_example_excludes_code_but_keeps_prose() {
+        let src = concat!(
+            "/// <example>Before <code>var x = 1;</code> after</example>\n",
+            "public void Foo() {}"
+        );
+
+        let result = parse_document("csharp", src, &ParserConfig::default());
+        assert_eq!(unit_texts(&result), vec!["Before", "after"]);
+        assert!(!result.plain_text().contains("var x = 1;"));
+    }
+
+    #[test]
+    fn test_csharp_xml_malformed_doc_keeps_prose_offsets() {
+        let src = concat!(
+            "/// <summary>Broken <b>tag</summary> tail\n",
+            "public void Foo() {}"
+        );
+
+        let result = parse_document("csharp", src, &ParserConfig::default());
+        let broken = segment_with_text(&result, "Broken");
+        let tail = segment_with_text(&result, "tail");
+
+        assert_eq!(broken.offset, src.find("Broken").unwrap());
+        assert_eq!(tail.offset, src.find("tail").unwrap());
+    }
+
+    #[test]
+    fn test_csharp_xml_malformed_doc_keeps_valid_block_boundaries() {
+        let src = concat!(
+            "/// <summary>Broken <b>tag</summary>\n",
+            "/// <returns>Return text</returns>\n",
+            "public string Foo() => \"x\";"
+        );
+
+        let result = parse_document("csharp", src, &ParserConfig::default());
+
+        assert_eq!(unit_texts(&result), vec!["Broken tag", "Return text"]);
+        assert_eq!(
+            segment_with_text(&result, "Broken").offset,
+            src.find("Broken").unwrap()
+        );
+        assert_eq!(
+            segment_with_text(&result, "Return text").offset,
+            src.find("Return text").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_csharp_single_line_block_xml_doc_uses_structured_extraction() {
+        let src = "/** <summary>Does work</summary> */\npublic void Foo() {}";
+
+        let result = parse_document("csharp", src, &ParserConfig::default());
+
+        assert_eq!(result.plain_text(), "Does work");
+        assert!(!result.plain_text().contains("<summary>"));
+        assert_eq!(
+            segment_with_text(&result, "Does work").offset,
+            src.find("Does work").unwrap()
         );
     }
 
