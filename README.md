@@ -63,7 +63,7 @@ When hovering over a grammar error, quick-fix actions let you add the offending 
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed component documentation, execution flow diagrams, and design trade-offs.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed component documentation and design trade-offs.
 
 ## License
 

@@ -1,17 +1,93 @@
 # Neovim Configuration
 
-Requires Neovim 0.11+. Add to your `init.lua`:
+Requires Neovim 0.11+.
+
+## Configuration Options
+
+- `endpoint = "http://localhost:8081"`: LanguageTool endpoint.
+- `language = "en-US"`: LanguageTool language.
+- `disableSpellCheck = false`: disable LanguageTool's dictionary spelling rule while keeping grammar and context rules.
+- `includeInlineComments = false`: include inline comments for languages that distinguish them from doc comments.
+
+## Minimal Config
+
+Add to your `init.lua`:
 
 ```lua
 vim.lsp.config('docolint', {
   cmd = { 'docolint' },
-  settings = {
-    initializationOptions = {
-      endpoint = "http://localhost:8081",  -- optional, defaults to localhost:8081
-      language = "en-AU",                  -- optional, defaults to en-US
-      disableSpellCheck = true,             -- optional, keeps grammar/context rules enabled
-      stopOnExit = false,                   -- optional but currently ignored; LT container is shared
-    },
+})
+
+vim.lsp.enable('docolint')
+```
+
+## Full Default-Values Config
+
+```lua
+vim.lsp.config('docolint', {
+  cmd = { 'docolint' },
+  init_options = {
+    endpoint = 'http://localhost:8081',
+    language = 'en-US',
+    disableSpellCheck = false,
+    includeInlineComments = false,
+  },
+})
+
+vim.lsp.enable('docolint')
+```
+
+## Attach To Filetypes
+
+Choose the filetypes you want `docolint` to attach to.
+
+```lua
+vim.lsp.config('docolint', {
+  cmd = { 'docolint' },
+  filetypes = { 'rust', 'cs', 'markdown' },
+})
+
+vim.lsp.enable('docolint')
+```
+
+Add more supported filetypes as needed.
+
+## Common Changes
+
+Custom LanguageTool endpoint:
+
+```lua
+vim.lsp.config('docolint', {
+  cmd = { 'docolint' },
+  init_options = {
+    endpoint = 'http://your-lt-server:8081',
+  },
+})
+
+vim.lsp.enable('docolint')
+```
+
+Different LanguageTool language with dictionary spelling disabled:
+
+```lua
+vim.lsp.config('docolint', {
+  cmd = { 'docolint' },
+  init_options = {
+    language = 'en-AU',
+    disableSpellCheck = true,
+  },
+})
+
+vim.lsp.enable('docolint')
+```
+
+Include inline comments too:
+
+```lua
+vim.lsp.config('docolint', {
+  cmd = { 'docolint' },
+  init_options = {
+    includeInlineComments = true,
   },
 })
 
@@ -27,15 +103,23 @@ Install `codebook-lsp` and make it available on your `$PATH`. Common options inc
 ```lua
 vim.lsp.config('docolint', {
   cmd = { 'docolint' },
-  settings = {
-    initializationOptions = {
-      disableSpellCheck = true,
-    },
+  filetypes = { 'rust', 'markdown' },
+  init_options = {
+    disableSpellCheck = true,
   },
+})
+
+vim.lsp.config('codebook', {
+  cmd = { 'codebook-lsp', 'serve' },
+  filetypes = { 'rust', 'markdown' },
 })
 
 vim.lsp.enable('docolint')
 vim.lsp.enable('codebook')
 ```
 
-`includeInlineComments = true` expands `docolint` from doc comments and prose to inline comments when you want grammar checks there too.
+Add more supported filetypes as needed.
+
+## Verify
+
+Run `:checkhealth vim.lsp` in Neovim.

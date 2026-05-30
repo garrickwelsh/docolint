@@ -7,6 +7,7 @@
 - `CONTEXT.md`: domain vocabulary.
 - `docs/STANDARDS.md`: coding, naming, testing expectations.
 - `docs/README.md`: supplemental guides and ADR index.
+- `docs/DIAGRAMS.md`: visual architecture and offset-mapping flows.
 - `.github/workflows/`: release and automation flow.
 - `crates/<crate>/ARCHITECTURE.md`: crate-local maps.
 

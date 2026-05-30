@@ -1,67 +1,58 @@
 # Helix Configuration
 
+## Configuration Options
+
+- `endpoint = "http://localhost:8081"`: LanguageTool endpoint.
+- `language = "en-US"`: LanguageTool language.
+- `disableSpellCheck = false`: disable LanguageTool's dictionary spelling rule while keeping grammar and context rules.
+- `includeInlineComments = false`: include inline comments for languages that distinguish them from doc comments.
+
+## Minimal Config
+
 Add to `~/.config/helix/languages.toml`:
 
+```toml
+[language-server.docolint]
+command = "docolint"
+```
+
+## Full Default-Values Config
+
+```toml
+[language-server.docolint]
+command = "docolint"
+config = {
+  endpoint = "http://localhost:8081",
+  language = "en-US",
+  disableSpellCheck = false,
+  includeInlineComments = false,
+}
+```
+
+## Attach To Languages
+
+Use `default-servers` to keep Helix's existing language-server set for each language and add `docolint` on top.
+
+Full example covering all currently supported parser languages:
 ```toml
 [language-server.docolint]
 command = "docolint"
 
 [[language]]
 name = "rust"
-language-servers = ["docolint", "rust-analyzer"]
+language-servers = ["default-servers", "docolint"]
 
 [[language]]
 name = "c-sharp"
-language-servers = ["docolint"]
-
-[[language]]
-name = "html"
-language-servers = ["docolint"]
+language-servers = ["default-servers", "docolint"]
 
 [[language]]
 name = "markdown"
-language-servers = ["docolint"]
-
-[[language]]
-name = "javascript"
-language-servers = ["docolint"]
-
-[[language]]
-name = "typescript"
-language-servers = ["docolint"]
-
-[[language]]
-name = "python"
-language-servers = ["docolint"]
-
-[[language]]
-name = "json"
-language-servers = ["docolint"]
-
-[[language]]
-name = "java"
-language-servers = ["docolint"]
-
-[[language]]
-name = "bash"
-language-servers = ["docolint"]
-
-[[language]]
-name = "powershell"
-language-servers = ["docolint"]
-
-[[language]]
-name = "scss"
-language-servers = ["docolint"]
-
-[[language]]
-name = "css"
-language-servers = ["docolint"]
-
-[[language]]
-name = "lua"
-language-servers = ["docolint"]
+language-servers = ["default-servers", "docolint"]
+# ...add more supported languages as needed.
 ```
+
+## Common Changes
 
 Custom LanguageTool endpoint:
 
@@ -71,12 +62,20 @@ command = "docolint"
 config = { endpoint = "http://your-lt-server:8081" }
 ```
 
-Specific LanguageTool language with dictionary spelling disabled:
+Different LanguageTool language with dictionary spelling disabled:
 
 ```toml
 [language-server.docolint]
 command = "docolint"
 config = { language = "en-AU", disableSpellCheck = true }
+```
+
+Include inline comments too:
+
+```toml
+[language-server.docolint]
+command = "docolint"
+config = { includeInlineComments = true }
 ```
 
 ## Recommended: Codebook + docolint
@@ -96,21 +95,17 @@ args = ["serve"]
 
 [[language]]
 name = "rust"
-language-servers = ["docolint", "codebook", "rust-analyzer"]
+language-servers = ["default-servers", "docolint", "codebook"]
 
 [[language]]
 name = "markdown"
-language-servers = ["docolint", "codebook"]
+language-servers = ["default-servers", "docolint", "codebook"]
 
-[[language]]
-name = "typescript"
-language-servers = ["docolint", "codebook"]
+# ...add more supported languages as needed.
 ```
 
-`docolint` defaults to doc comments and prose-oriented content. If you want grammar checking for inline comments too, set `includeInlineComments = true` on `docolint`.
-
-You can verify setup with:
+## Verify
 
 ```bash
-hx --health rust
+hx --health
 ```

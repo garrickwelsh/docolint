@@ -253,10 +253,6 @@ pub struct ServerState {
     pub error_cooldown: Duration,
     /// Root path of the workspace, used for dictionary loading and ignore actions.
     pub workspace_root: Option<PathBuf>,
-    /// Whether this server instance attempted to auto-start a local LanguageTool container.
-    pub started_lt: bool,
-    /// Retained for config compatibility. Shared LanguageTool containers are not auto-stopped.
-    pub stop_on_exit: bool,
     pub include_inline_comments: bool,
 }
 
@@ -278,8 +274,6 @@ impl ServerState {
             last_error_time: None,
             error_cooldown: Duration::from_secs(60),
             workspace_root: None,
-            started_lt: false,
-            stop_on_exit: false,
             include_inline_comments: false,
         }
     }
@@ -339,8 +333,6 @@ pub struct InitializationOptions {
     pub endpoint: Option<String>,
     /// LanguageTool language code. Defaults to `en-US` if not provided.
     pub language: Option<String>,
-    /// Retained for compatibility but ignored because LanguageTool containers are shared.
-    pub stop_on_exit: Option<bool>,
     pub include_inline_comments: Option<bool>,
     pub disable_spell_check: Option<bool>,
 }
@@ -1115,13 +1107,6 @@ fn handle_notification(
     }
 }
 
-/// Stops auto-started LanguageTool container when shutdown policy requires it.
-fn stop_language_tool_if_needed(state: &Arc<RwLock<ServerState>>) {
-    if state.read().unwrap().stop_on_exit {
-        // Auto-started LanguageTool acts as shared infra across docolint instances.
-    }
-}
-
 /// Routes LSP requests handled inside main server loop.
 ///
 /// Shutdown requests terminate loop via `Err(())`. All other known request types
@@ -1132,7 +1117,6 @@ fn handle_request(
     req: lsp_server::Request,
 ) -> Result<(), ()> {
     if let Ok(true) = connection.handle_shutdown(&req) {
-        stop_language_tool_if_needed(&state);
         return Err(());
     }
 
@@ -1157,7 +1141,7 @@ fn handle_request(
 /// # Arguments
 /// * `connection` - The LSP stdio connection from the editor.
 /// * `params` - Initialization parameters from the editor, including optional
-///   `InitializationOptions` for endpoint and container lifecycle config.
+///   `InitializationOptions` for endpoint and parser behavior.
 ///
 /// # Errors
 /// Returns an error if the connection fails or the message loop encounters an
@@ -1173,7 +1157,6 @@ pub async fn run(
         .unwrap_or(InitializationOptions {
             endpoint: None,
             language: None,
-            stop_on_exit: None,
             include_inline_comments: None,
             disable_spell_check: None,
         });
@@ -1182,7 +1165,6 @@ pub async fn run(
         .endpoint
         .unwrap_or_else(|| "http://localhost:8081".to_string());
     let language = options.language.unwrap_or_else(|| "en-US".to_string());
-    let stop_on_exit = options.stop_on_exit.unwrap_or(false);
     let include_inline_comments = options.include_inline_comments.unwrap_or(false);
     let disable_spell_check = options.disable_spell_check.unwrap_or(false);
 
@@ -1199,15 +1181,12 @@ pub async fn run(
         let url: Url = serde_json::from_value(serde_json::to_value(&first.uri).ok()?).ok()?;
         url.to_file_path().ok()
     });
-    state_raw.stop_on_exit = stop_on_exit;
     state_raw.include_inline_comments = include_inline_comments;
     let state = Arc::new(RwLock::new(state_raw));
 
     // Ensure local/default LanguageTool is reachable before entering blocking LSP receive loop.
-    if !probe_language_tool(&endpoint)
-        && ensure_language_tool_running(&endpoint, &connection.sender)
-    {
-        state.write().unwrap().started_lt = true;
+    if !probe_language_tool(&endpoint) {
+        let _ = ensure_language_tool_running(&endpoint, &connection.sender);
     }
 
     let state_for_loop = state.clone();
